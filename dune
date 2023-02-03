@@ -1,0 +1,14 @@
+(env 
+  (dev (flags (:standard -w -27..35 -g))))
+(executable
+ (modes byte)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.show ppx_deriving.make))
+ (libraries 
+   ocaml-compiler-libs.bytecomp
+   ocaml-compiler-libs.common
+   ocaml-compiler-libs.optcomp
+   ocaml-compiler-libs.shadow
+   ocaml-compiler-libs.toplevel
+   )
+ (name ocamldumper))

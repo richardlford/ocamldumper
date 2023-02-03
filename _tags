@@ -1,0 +1,4 @@
+true: package(ocaml-compiler-libs.bytecomp)
+true: package(ocaml-compiler-libs.common)
+true: package(ocaml-compiler-libs.optcomp)
+true: debug
