@@ -1,9 +1,24 @@
 (env 
-  (dev (flags (:standard -w -27..35 -g))))
+  (dev (flags (:standard -w -9..35 -g))))
 (executable
  (modes byte)
+ (modules ocamldumper)
  (preprocess
-  (pps lwt_ppx ppx_deriving.show ppx_deriving.make))
+  (pps lwt_ppx))
+ (libraries 
+   ocaml-compiler-libs.bytecomp
+   ocaml-compiler-libs.common
+   ocaml-compiler-libs.optcomp
+   ocaml-compiler-libs.shadow
+   ocaml-compiler-libs.toplevel
+   print_typed print_typ
+   )
+ (name ocamldumper))
+
+(library
+  (modes byte)
+  (name print_typed)
+  (modules print_typed)
  (libraries 
    ocaml-compiler-libs.bytecomp
    ocaml-compiler-libs.common
@@ -11,4 +26,17 @@
    ocaml-compiler-libs.shadow
    ocaml-compiler-libs.toplevel
    )
- (name ocamldumper))
+  )
+
+  (library
+  (modes byte)
+  (name print_typ)
+  (modules print_typ)
+ (libraries 
+   ocaml-compiler-libs.bytecomp
+   ocaml-compiler-libs.common
+   ocaml-compiler-libs.optcomp
+   ocaml-compiler-libs.shadow
+   ocaml-compiler-libs.toplevel
+   )
+  )

@@ -29,6 +29,8 @@ let no_approx = ref false
 let no_code = ref false
 let no_crc = ref false
 let no_debug = ref false
+let do_test = ref false
+let the_filename = ref ""
 
 module Magic_number = Misc.Magic_number
 
@@ -75,11 +77,11 @@ let get_env ev =
 
 let print_summary_id ppf title id = 
   fprintf ppf " %s: " title;
-  Id.print_with_scope std_formatter id
+  Id.print_with_scope ppf id;
+  fprintf ppf  ";@ "
 
 let print_summary_string ppf title s =
-  fprintf ppf " %s: " title;
-  fprintf ppf " %s: " s
+  fprintf ppf " %s: %s@ " title s
 
 let next_summary summary =
       match summary with
@@ -99,27 +101,75 @@ let next_summary summary =
       | Env_value_unbound (s, n, r) -> Some s
       | Env_module_unbound (s, n, r) -> Some s
 
+let print_value_desc ppf (vd: Types.value_description) =
+  fprintf ppf "@[{";
+  fprintf ppf "val_type=@ ";
+  Print_typ.raw_type_expr ppf vd.val_type;
+  ignore vd.val_kind;
+  ignore vd.val_loc;
+  ignore vd.val_attributes;
+  ignore vd.val_uid;
+  fprintf ppf "}@]"
+
+      (*
+    let ls = ev.ev_loc.loc_start in
+    let le = ev.ev_loc.loc_end in
+    fprintf ppf "ev_loc={File \"%s\", line %d, characters %d-%d},@ " ls.Lexing.pos_fname
+      ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
+      (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
+      *)
+
+let myprint_loc ppf (loc: Location.t)  =
+  if !print_locations then begin
+    let ls = loc.loc_start in
+    let filename = ls.pos_fname in
+    if filename <> "_none_" then begin
+      fprintf ppf ",@ ";
+      Location.print_loc ppf loc;
+    end else ()
+  end else ()
+
 let print_summary_item ppf summary =
   fprintf ppf "\n    ";
   match summary with
   | Env.Env_empty ->
       print_summary_string ppf "Env_empty" ""
   | Env_value (s, id, vd) ->
-      print_summary_id ppf "Env_value" id
+      fprintf ppf "@[<hov 2>";
+      (* print_summary_id ppf "Env_value" id; *)
+      Print_typ.value_description id ppf vd;
+      myprint_loc ppf vd.val_loc;
+      fprintf ppf ",@ ";
+      (*
+      Location.print_loc ppf vd.val_loc;
+      fprintf ppf ",@ ";
+      *)
+      fprintf ppf "#atts=%d@ " (List.length vd.val_attributes);
+      fprintf ppf "@]@;"
+      (* print_value_desc ppf vd; *)
   | Env_type (s, id, td) ->
-      print_summary_id ppf "Env_type" id
+      fprintf ppf "@[<hov 2>";
+      (* print_summary_id ppf "Env_type" id; *)
+      Print_typ.type_declaration id ppf td;
+      myprint_loc ppf td.type_loc;
+      fprintf ppf "@]@;"
   | Env_extension (s, id, ec) ->
-      print_summary_id ppf "Env_extension" id
+      fprintf ppf "@[<hov 2>";
+      (* print_summary_id ppf "Env_extension" id; *)
+      Print_typ.extension_constructor id ppf ec;
+      myprint_loc ppf ec.ext_loc;
+      fprintf ppf "@]@;"
   | Env_module (s, id, mp, md) ->
-      print_summary_id ppf "Env_module" id
+      print_summary_id ppf "Env_module" id;
   | Env_modtype (s, id, md) ->
-      print_summary_id ppf "Env_modtype" id
+      print_summary_id ppf "Env_modtype" id;
+      Print_typ.modtype_declaration id ppf md
   | Env_class (s, id, cd) ->
       print_summary_id ppf "Env_class" id
   | Env_cltype (s, id, ctd) ->
       print_summary_id ppf "Env_cltype" id
   | Env_open (s, p) ->
-      print_summary_string ppf "Env_open" "path"
+      print_summary_string ppf "Env_open" (Path.name p)
   | Env_functor_arg (s, id) ->
       print_summary_id ppf "Env_functor_arg" id
   | Env_constraints (s, cstrs) ->
@@ -141,34 +191,67 @@ let rec print_summary ppf summary =
   | None -> ()
   | Some s -> print_summary ppf s
 
+let print_ident_tbl ppf  (title: string) (tbl: int Ident.tbl) =
+  if tbl = Ident.empty then begin
+    fprintf ppf "%s = empty@ " title
+  end else begin
+    fprintf ppf "@[<hv 2>%s {@ " title;
+    Ident.iter (fun id idval -> 
+      fprintf ppf "%s=%d@ " (Ident.name id) idval
+      ) tbl;
+    fprintf ppf "}@ @]";
+  end
+  
+(* 
+type compilation_env =
+  { ce_stack: int Ident.tbl; (* Positions of variables in the stack *)
+    ce_heap: int Ident.tbl;  (* Structure of the heap-allocated env *)
+    ce_rec: int Ident.tbl }  (* Functions bound by the same let rec *)
+   
+*)
+let print_comp_env ppf (ce : I.compilation_env) =
+  let stack : int Ident.tbl = ce.ce_stack in
+  let heap : int Ident.tbl = ce.ce_heap in
+  let recs : int Ident.tbl = ce.ce_rec in
+  if stack = Ident.empty && 
+     heap = Ident.empty &&
+     recs = Ident.empty 
+  then () 
+  else begin 
+    fprintf ppf "@[<hv 2>ev_compenv{@;";
+    print_ident_tbl ppf "ce_stack" stack;
+    print_ident_tbl ppf "ce_heap" heap;
+    print_ident_tbl ppf "ce_rec" recs;
+    fprintf ppf "}@ @]";
+  end
+
+
 let print_ev ppf ev j =
-  fprintf ppf "ev[%d]:{\n" j;
-  fprintf ppf "  pc=%d\n" ev.I.ev_pos;
-  fprintf ppf "  ev_module=%s\n" ev.I.ev_module;
-  if !print_locations then
-    let ls = ev.ev_loc.loc_start in
-    let le = ev.ev_loc.loc_end in
-    fprintf ppf "File \"%s\", line %d, characters %d-%d:\n" ls.Lexing.pos_fname
-      ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
-      (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
-  fprintf ppf "  ev_kind=%s\n" (kind_string ev);
-  fprintf ppf "  ev_defname=%s\n" ev.ev_defname;
-  fprintf ppf "  ev_info=%s\n" (info_string ev);
-  fprintf ppf "  ev_typenv={";
+  fprintf ppf "@[<2>ev[%d]:{@ " j;
+  fprintf ppf "pc=%d,@ " ev.I.ev_pos;
+  fprintf ppf "ev_module=%s" ev.I.ev_module;
+  myprint_loc ppf ev.ev_loc;
+  fprintf ppf ",@ ev_kind=%s,@ " (kind_string ev);
+  fprintf ppf "ev_defname=%s,@ " ev.ev_defname;
+  fprintf ppf "ev_info=%s,@ " (info_string ev);
+  fprintf ppf "ev_typenv={@;@[";
   print_summary ppf ev.ev_typenv;
-  fprintf ppf "}\n";
-  (*  "  ev_typenv=%s\n" ev.ev_typenv; *)
-  (* fprintf ppf "  ev_typsubst=%s\n" ev.ev_typsubst; *)
-  (* fprintf ppf "  ev_compenv=%s\n" ev.ev_compenv; *)
-  fprintf ppf "  ev_stacksize=%d\n" ev.ev_stacksize;
-  fprintf ppf "  ev_repr=%s\n" (repr_string ev);
-  pp_print_string ppf "  }\n";
+  fprintf ppf "}@;@]@.";
+  let xx : Subst.t = ev.ev_typsubst in
+  ignore xx;
+  print_comp_env ppf ev.ev_compenv;
+  fprintf ppf "ev_stacksize=%d,@ " ev.ev_stacksize;
+  fprintf ppf "ev_repr=%s,@ " (repr_string ev);
+  fprintf ppf "}@]@.";
   ()
 
 let dump_eventlist ppf orig ic =
-    fprintf ppf "{  orig=%d\n" orig;
+  if !no_debug then () else begin
+    fprintf ppf "@[{orig=%d,@ " orig;
+    let in_pos = pos_in ic in
+    printf "in_pos=%u,@ " in_pos;
     let evl : (I.debug_event list) = input_value ic in
-    fprintf ppf "  length evl=%d\n" (List.length evl);
+    fprintf ppf "length evl=%d@." (List.length evl);
     let j = ref 0 in
     List.iter (fun ev ->
       relocate_event orig ev;
@@ -176,22 +259,26 @@ let dump_eventlist ppf orig ic =
       j := !j + 1;
       ) evl;
     let (dirs : string list) = input_value ic in
-    fprintf ppf "  dirs=%s" (String.concat "," dirs);
-    pp_print_string ppf "}\n"
+    fprintf ppf "@[<v 2>dirs=";
+    List.iter (fun dir -> fprintf ppf "%s@ " dir) dirs;
+    fprintf ppf "}@]@.";
+  end
 
 let dump_eventlists ppf ic =
-  let debug_len = C.Bytesections.seek_section ic "DBUG" in
-  fprintf ppf "{debug_len=%d\n" debug_len;
-  let pos = pos_in ic in
-  fprintf ppf "pos=%d\n" pos;
+  if !no_debug then () else begin
+    let debug_len = C.Bytesections.seek_section ic "DBUG" in
+    fprintf ppf "{debug_len=%d\n" debug_len;
+    let pos = pos_in ic in
+    fprintf ppf "pos=%d\n" pos;
 
-  let num_eventlists = input_binary_int ic in
-  fprintf ppf "num_eventlists=%d\n" num_eventlists;
-  for i = 1 to num_eventlists do
-    let orig = input_binary_int ic in
-    dump_eventlist ppf orig ic
-  done;
-  fprintf ppf "}\n"
+    let num_eventlists = input_binary_int ic in
+    fprintf ppf "num_eventlists=%d\n" num_eventlists;
+    for i = 1 to num_eventlists do
+      let orig = input_binary_int ic in
+      dump_eventlist ppf orig ic
+    done;
+    fprintf ppf "}\n";
+  end
 
 let input_stringlist ic len =
   let get_string_list sect len =
@@ -225,7 +312,7 @@ let print_line name =
 let print_required_global id =
   printf "\t%s\n" (Ident.name id)
 
-let print_cmo_infos cu =
+let print_cmo_infos ic cu =
   printf "Unit name: %s\n" cu.cu_name;
   print_string "Interfaces imported:\n";
   List.iter print_name_crc cu.cu_imports;
@@ -238,12 +325,23 @@ let print_cmo_infos cu =
         printf "YES\n";
         printf "Primitives declared in this module:\n";
         List.iter print_line l);
-  printf "Force link: %s\n" (if cu.cu_force_link then "YES" else "no")
+  printf "Force link: %s\n" (if cu.cu_force_link then "YES" else "no");
+  let debug_size = cu.cu_debugsize in
+  printf "debug_size=%u\n" debug_size;
+  if debug_size > 0 then begin
+    printf "cu_debug=%u@." cu.cu_debug;
+    let in_pos = pos_in ic in
+    printf "in_pos=%u@." in_pos;
+    
+    seek_in ic cu.cu_debug;
+    dump_eventlist std_formatter 0 ic;
+    
+  end
 
 let print_spaced_string s =
   printf " %s" s
 
-let print_cma_infos (lib : Cmo_format.library) =
+let print_cma_infos ic (lib : Cmo_format.library) =
   printf "Force custom: %s\n" (if lib.lib_custom then "YES" else "no");
   printf "Extra C object files:";
   (* PR#4949: print in linking order *)
@@ -254,7 +352,7 @@ let print_cma_infos (lib : Cmo_format.library) =
   print_string "Extra dynamically-loaded libraries:";
   List.iter print_spaced_string (List.rev lib.lib_dllibs);
   printf "\n";
-  List.iter print_cmo_infos lib.lib_units
+  List.iter (print_cmo_infos ic) lib.lib_units
 
 let print_cmi_infos name crcs =
   printf "Unit name: %s\n" name;
@@ -440,19 +538,14 @@ let dump_obj_by_kind filename ic obj_kind =
        let cu_pos = input_binary_int ic in
        seek_in ic cu_pos;
        let cu = (input_value ic : compilation_unit) in
-       print_cmo_infos cu;
-       let debug_size = cu.cu_debugsize in
-       if debug_size > 0 then begin
-        seek_in ic cu.cu_debug;
-        dump_eventlist std_formatter 0 ic
-       end;
+       print_cmo_infos ic cu;
        close_in ic;
     | Cma ->
        let toc_pos = input_binary_int ic in
        seek_in ic toc_pos;
        let toc = (input_value ic : library) in
-       close_in ic;
-       print_cma_infos toc
+       print_cma_infos ic toc;
+       close_in ic
     | Cmi | Cmt ->
        close_in ic;
        let cmi, cmt = Cmt_format.read filename in
@@ -491,6 +584,14 @@ let dump_obj_by_kind filename ic obj_kind =
          (human_name_of_kind obj_kind)
 
 let dump_obj filename =
+  the_filename := filename;
+  if !do_test then begin
+    printf "File %s\n" filename;
+    let ic = open_in_bin filename in
+    seek_in ic 28;
+    dump_eventlist std_formatter 0 ic;
+    ()
+  end else
   let open Magic_number in
   let dump_standard ic =
     match read_current_info ~expected_kind:None ic with
@@ -535,17 +636,17 @@ let dump_obj filename =
          dump_obj_by_kind filename ic Cmxs;
          ()
   in
-  printf "File %s\n" filename;
+  printf "@[<v>File %s@ " filename;
   let ic = open_in_bin filename in
   match dump_standard ic with
-    | Ok () -> ()
+    | Ok () -> printf "@]"
     | Error head_error ->
   match dump_exec ic with
-    | Ok () -> ()
+    | Ok () -> printf "@]"
     | Error () ->
   if Filename.check_suffix filename ".cmxs"
-  then dump_cmxs ic
-  else exit_magic_error ~expected_kind:None (Parse_error head_error)
+  then (dump_cmxs ic; printf "@]")
+  else (printf "@]";exit_magic_error ~expected_kind:None (Parse_error head_error))
 
 let arg_list = [
   "-no-approx", Arg.Set no_approx,
@@ -554,6 +655,8 @@ let arg_list = [
     " Do not print code from exported flambda functions";
   "-no-debug", Arg.Set no_debug,
     " Do not print debug information";
+  "-test", Arg.Set do_test,
+    " Do special test";
   "-null-crc", Arg.Set no_crc, " Print a null CRC for imported interfaces";
   "-args", Arg.Expand Arg.read_arg,
      "<file> Read additional newline separated command line arguments \n\
