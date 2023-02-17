@@ -225,8 +225,46 @@ let print_comp_env ppf (ce : I.compilation_env) =
     fprintf ppf "}@ @]";
   end
 
+  (* From typing/subst.ml 
+    type type_replacement =
+      | Path of Path.t
+      | Type_function of { params : type_expr list; body : type_expr }
 
-let print_ev ppf ev j =
+    type t =
+      { types: type_replacement Path.Map.t;
+        modules: Path.t Path.Map.t;
+        modtypes: module_type Path.Map.t;
+        for_saving: bool;
+        loc: Location.t option;
+      }
+  *)
+  let print_subst ppf title (ts: Subst.t) =
+    if ts = Subst.identity then begin
+      (* fprintf ppf "%s is empty substitution,@ " title *)
+      ()
+    end else begin
+      (* Unfortunately, the substitution is not made available *)
+      fprintf ppf "{%s is non-empty (but opaque) substitution},@ " title
+    end
+
+
+(* From instruct.mli 
+
+type debug_event =
+  { mutable ev_pos: int;                (* Position in bytecode *)
+    ev_module: string;                  (* Name of defining module *)
+    ev_loc: Location.t;                 (* Location in source file *)
+    ev_kind: debug_event_kind;          (* Before/after event *)
+    ev_defname: string;                 (* Enclosing definition *)
+    ev_info: debug_event_info;          (* Extra information *)
+    ev_typenv: Env.summary;             (* Typing environment *)
+    ev_typsubst: Subst.t;               (* Substitution over types *)
+    ev_compenv: compilation_env;        (* Compilation environment *)
+    ev_stacksize: int;                  (* Size of stack frame *)
+    ev_repr: debug_event_repr }         (* Position of the representative *)
+
+*)
+let print_ev ppf (ev: I.debug_event)  j =
   fprintf ppf "@[<2>ev[%d]:{@ " j;
   fprintf ppf "pc=%d,@ " ev.I.ev_pos;
   fprintf ppf "ev_module=%s" ev.I.ev_module;
@@ -237,9 +275,8 @@ let print_ev ppf ev j =
   fprintf ppf "ev_typenv={@;@[";
   print_summary ppf ev.ev_typenv;
   fprintf ppf "}@;@]@.";
-  let xx : Subst.t = ev.ev_typsubst in
-  ignore xx;
   print_comp_env ppf ev.ev_compenv;
+  print_subst ppf "ev_typsubst" ev.ev_typsubst;
   fprintf ppf "ev_stacksize=%d,@ " ev.ev_stacksize;
   fprintf ppf "ev_repr=%s,@ " (repr_string ev);
   fprintf ppf "}@]@.";
