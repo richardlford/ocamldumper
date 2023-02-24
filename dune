@@ -1,6 +1,22 @@
+(* -*- tuareg -*- *)
+
+let impl_libs =
+  Scanf.sscanf
+    Sys.ocaml_version
+    "%d.%2d.%s"
+    (fun maj min _ ->
+      match maj, min with
+      | 4, 12 -> ["xprinttyp_412"]
+      | 4, 14 -> ["xprinttyp_414"]
+      | 5, _ -> ["xprinttyp_414"]
+      (* | 4, min when min >= 12 -> ["printtyp_412"] *)
+      | _ -> assert false)
+
+let () = Jbuild_plugin.V1.send @@ {|
 (env 
-  (dev (flags (:standard -w -9..35 -g))))
+  (dev (flags (:standard -w -9..37 -g))))
 (executable
+ (name ocamldumper)
  (modes byte)
  (modules ocamldumper)
  (preprocess
@@ -11,32 +27,6 @@
    ocaml-compiler-libs.optcomp
    ocaml-compiler-libs.shadow
    ocaml-compiler-libs.toplevel
-   print_typed print_typ
-   )
- (name ocamldumper))
-
-(library
-  (modes byte)
-  (name print_typed)
-  (modules print_typed)
- (libraries 
-   ocaml-compiler-libs.bytecomp
-   ocaml-compiler-libs.common
-   ocaml-compiler-libs.optcomp
-   ocaml-compiler-libs.shadow
-   ocaml-compiler-libs.toplevel
-   )
-  )
-
-  (library
-  (modes byte)
-  (name print_typ)
-  (modules print_typ)
- (libraries 
-   ocaml-compiler-libs.bytecomp
-   ocaml-compiler-libs.common
-   ocaml-compiler-libs.optcomp
-   ocaml-compiler-libs.shadow
-   ocaml-compiler-libs.toplevel
-   )
-  )
+   opnames
+|} ^ String.concat "\n" impl_libs ^ {|))
+|}

@@ -1,0 +1,4 @@
+(library
+ (name opnames)
+ (flags (:standard -w "-9"))
+ )

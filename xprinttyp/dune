@@ -1,0 +1,6 @@
+(library
+ (name xprinttyp)
+ (flags (:standard -w "-9"))
+ (libraries compiler-libs.common)
+ (virtual_modules xprinttyp)
+ )

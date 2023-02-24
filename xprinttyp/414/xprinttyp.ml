@@ -458,7 +458,7 @@ let raw_list pr ppf = function
       fprintf ppf "@[<1>[%a%t]@]" pr a
         (fun ppf -> List.iter (fun x -> fprintf ppf ";@,%a" pr x) l)
 
-let kind_vars: int list ref = ref []
+let kind_vars = ref []
 let kind_count = ref 0
 
 let string_of_field_kind v =
