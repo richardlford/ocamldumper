@@ -1,0 +1,13 @@
+(library
+ (name show_source)
+ (libraries 
+   compiler-libs.bytecomp
+   compiler-libs.common
+   compiler-libs.optcomp
+   compiler-libs.toplevel
+   primitives
+   source
+   events
+   )
+ (flags (:standard -w "-9"))
+ )

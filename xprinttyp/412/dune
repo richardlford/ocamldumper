@@ -1,7 +1,7 @@
 (library
  (name xprinttyp_412)
  (flags (:standard -w "-9"))
- (libraries ocaml-compiler-libs.common)
+ (libraries compiler-libs.common)
  (modules xprinttyp)
  (enabled_if (and (>= %{ocaml_version} 4.12) (< %{ocaml_version} 4.14)))
  (implements xprinttyp))

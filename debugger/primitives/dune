@@ -1,0 +1,11 @@
+(library
+ (name primitives)
+ (flags (:standard -w "-9"))
+ (libraries 
+   compiler-libs.bytecomp
+   compiler-libs.common
+   compiler-libs.optcomp
+   compiler-libs.toplevel
+   unix
+   )
+ )

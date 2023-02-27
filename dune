@@ -22,11 +22,11 @@ let () = Jbuild_plugin.V1.send @@ {|
  (preprocess
   (pps lwt_ppx))
  (libraries 
-   ocaml-compiler-libs.bytecomp
-   ocaml-compiler-libs.common
-   ocaml-compiler-libs.optcomp
-   ocaml-compiler-libs.shadow
-   ocaml-compiler-libs.toplevel
+   compiler-libs.bytecomp
+   compiler-libs.common
+   compiler-libs.optcomp
+   compiler-libs.toplevel
    opnames
+   show_source
 |} ^ String.concat "\n" impl_libs ^ {|))
 |}

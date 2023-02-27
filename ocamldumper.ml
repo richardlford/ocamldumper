@@ -43,23 +43,17 @@ let print_imports_flag = ref true
 let print_locations_flag = ref true
 let print_primitives_flag = ref true
 let print_reloc_info_flag = ref true
+let print_source_flag = ref true
 
 module Magic_number = Misc.Magic_number
 
-module B = Ocaml_bytecomp
-module C = Ocaml_common
-module O = Ocaml_optcomp
-module Compilation_unit = O.Compilation_unit
-module Cf = Ocaml_common.Config
-module I = B.Instruct
-module Env = C.Env
-module Envx = C.Envaux
-module Id = C.Ident
-module Lambda = C.Lambda
 open Lambda
 open Format
 open Opcodes
 open Opnames
+
+let () =
+  Load_path.init []
 
 (* Read signed and unsigned integers *)
 
@@ -90,10 +84,10 @@ let primitives = ref ([||] : string array)     (* Table of primitives *)
 let objfile = ref true                        (* true if dumping a .cmo *)
 
 (* Events (indexed by PC) *)
-let event_table = (Hashtbl.create 253 : (int, I.debug_event) Hashtbl.t)
+let event_table = (Hashtbl.create 253 : (int, Instruct.debug_event) Hashtbl.t)
 
 let relocate_event orig ev =
-  ev.I.ev_pos <- orig + ev.I.ev_pos;
+  ev.Instruct.ev_pos <- orig + ev.Instruct.ev_pos;
    match ev.ev_repr with 
    Event_parent repr -> repr := ev.ev_pos 
    | _ -> ()
@@ -448,29 +442,29 @@ let print_reloc (info, pos) =
 
 
 let kind_string ev =
-    (match ev.I.ev_kind with
+    (match ev.Instruct.ev_kind with
       Event_before   -> "before"
     | Event_after _  -> "after"
     | Event_pseudo   -> "pseudo")
 
 let info_string ev =
-  (match ev.I.ev_info with
+  (match ev.Instruct.ev_info with
       Event_function -> "/fun"
     | Event_return _ -> "/ret"
     | Event_other    -> "")
 
 let repr_string ev =
-  (match ev.I.ev_repr with
+  (match ev.Instruct.ev_repr with
     Event_none        -> ""
   | Event_parent _    -> "(repr)"
   | Event_child repr  -> Int.to_string !repr)
 
 let get_env ev = 
-  Envx.env_from_summary ev.I.ev_typenv
+  Envaux.env_from_summary ev.Instruct.ev_typenv
 
 let print_summary_id title id = 
   printf " %s: " title;
-  Id.print_with_scope std_formatter id;
+  Ident.print_with_scope std_formatter id;
   printf  ";@ "
 
 let print_summary_string title s =
@@ -602,7 +596,7 @@ type compilation_env =
     ce_rec: int Ident.tbl }  (* Functions bound by the same let rec *)
    
 *)
-let print_comp_env (ce : I.compilation_env) =
+let print_comp_env (ce : Instruct.compilation_env) =
   let stack : int Ident.tbl = ce.ce_stack in
   let heap : int Ident.tbl = ce.ce_heap in
   let recs : int Ident.tbl = ce.ce_rec in
@@ -658,9 +652,11 @@ type debug_event =
 
 *)
 
-let print_ev (ev: I.debug_event) =
-  printf "pc=%d,@ " ev.I.ev_pos;
-  printf "ev_module=%s" ev.I.ev_module;
+let print_ev (ev: Instruct.debug_event) =
+  if !print_source_flag then
+    Show_source.show_point ev true;
+  printf "pc=%d,@ " ev.Instruct.ev_pos;
+  printf "ev_module=%s" ev.Instruct.ev_module;
   myprint_loc ev.ev_loc;
   printf ",@ ev_kind=%s,@ " (kind_string ev);
   printf "ev_defname=%s,@ " ev.ev_defname;
@@ -674,7 +670,7 @@ let print_ev (ev: I.debug_event) =
   printf "ev_repr=%s,@ " (repr_string ev);
   ()
 
-let print_event (ev: I.debug_event) =
+let print_event (ev: Instruct.debug_event) =
   if !print_full_events_flag then
     print_ev ev
   else if !print_locations_flag then
@@ -684,9 +680,11 @@ let print_event (ev: I.debug_event) =
     ev.ev_defname
     ls.Lexing.pos_fname
       ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
-      (le.Lexing.pos_cnum - ls.Lexing.pos_bol)
+      (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
+    if !print_source_flag then
+      Show_source.show_point ev true
 
-let print_ev_indexed (ev: I.debug_event)  j =
+let print_ev_indexed (ev: Instruct.debug_event)  j =
   printf "@[<2>ev[%d]:{@ " j;
   print_event ev;
   printf "}@]@.";
@@ -865,7 +863,7 @@ let print_cmo_infos ic cu =
       printf "in_pos=%u@." in_pos;
     end;
     seek_in ic cu.cu_debug;
-    let evl = (input_value ic : I.debug_event list) in
+    let evl = (input_value ic : Instruct.debug_event list) in
     record_events 0 evl;
     let (dirs : string list) = input_value ic in
     if !print_dirs_flag then begin
@@ -919,10 +917,26 @@ let print_cma_infos ic (lib : Cmo_format.library) =
   printf "@.";
   List.iter (print_cmo_infos ic) lib.lib_units
 
-let print_cmi_infos name crcs =
-  printf "Unit name: %s@." name;
-  printf "Interfaces imported:@.";
-  List.iter print_name_crc crcs
+let string_of_pers_flags fl = 
+  match fl with 
+    Cmi_format.Rectypes -> "Rectypes"
+  | Alerts al -> "Alerts"
+  | Cmi_format.Opaque -> "Opaque"
+  | Unsafe_string -> "Unsafe_string"
+
+let print_cmi_infos cmi =
+  printf "Unit name: %s@." cmi.Cmi_format.cmi_name;
+  printf "Flags:@.";
+  List.iter (fun flag -> printf "%s@ " (string_of_pers_flags flag)) 
+  cmi.cmi_flags;
+
+  if !print_imports_flag then begin
+    printf "Interfaces imported:@.";
+    List.iter print_name_crc cmi.Cmi_format.cmi_crcs;
+  end;
+  printf "Signatures:@.";
+  Xprinttyp.signature std_formatter cmi.cmi_sign;
+  printf "@."
 
 let print_cmt_infos cmt =
   let open Cmt_format in
@@ -1111,7 +1125,7 @@ let dump_byte ic =
       let orig = input_binary_int ic in
       if !print_debug_flag then
         (printf "orig=%d@." orig);
-      let evl = (input_value ic : I.debug_event list) in
+      let evl = (input_value ic : Instruct.debug_event list) in
       record_events orig evl;
       let (dirs : string list) = input_value ic in
       if !print_dirs_flag then begin
@@ -1168,13 +1182,16 @@ let dump_obj_by_kind filename ic obj_kind =
        let toc = (input_value ic : library) in
        print_cma_infos ic toc;
        close_in ic
-    | Cmi | Cmt ->
+    | Cmi -> 
+        let cmi = Cmi_format.input_cmi ic in
+        print_cmi_infos cmi
+    | Cmt ->
        close_in ic;
        let cmi, cmt = Cmt_format.read filename in
        begin match cmi with
          | None -> ()
          | Some cmi ->
-            print_cmi_infos cmi.Cmi_format.cmi_name cmi.Cmi_format.cmi_crcs
+            print_cmi_infos cmi
        end;
        begin match cmt with
          | None -> ()
@@ -1344,6 +1361,8 @@ let arg_list = [
     " Do not print primitives used table";
   "-reloc", Arg.Set print_reloc_info_flag, " Print relocation information for the code";
   "-no-reloc", Arg.Clear print_reloc_info_flag, " Do not print relocation information for the code";
+  "-source", Arg.Set print_source_flag, " Print source with code";
+  "-no-source", Arg.Clear print_source_flag, " Do not print source with code";
   "-all", Arg.Unit print_all,
     "Enable all print options";
   "-none", Arg.Unit print_none,

@@ -1,0 +1,7 @@
+(library
+ (name events)
+ (flags (:standard -w "-9"))
+ (libraries 
+   compiler-libs.bytecomp
+   )
+ )
