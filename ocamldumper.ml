@@ -634,6 +634,20 @@ let print_comp_env (ce : Instruct.compilation_env) =
       printf "{%s is non-empty (but opaque) substitution},@ " title
     end
 
+(* If there is a non-trivial substitution, get the summary of the
+   substituted environment. *)
+let get_substituted_summary (ev: Instruct.debug_event) =
+  let summary = ev.ev_typenv in
+  let subst = ev.ev_typsubst in
+  if subst = Subst.identity then
+    (* No substitution *)
+    summary
+  else begin
+    let env2 = Envaux.env_from_summary summary subst in
+    let summary2 = Env.summary env2 in
+    summary2
+  end
+  
 
 (* From instruct.mli 
 
@@ -662,7 +676,7 @@ let print_ev (ev: Instruct.debug_event) =
   printf "ev_defname=%s,@ " ev.ev_defname;
   printf "ev_info=%s,@ " (info_string ev);
   printf "ev_typenv={@;@[";
-  print_summary ev.ev_typenv;
+  print_summary (get_substituted_summary ev);
   printf "}@;@]@.";
   print_comp_env ev.ev_compenv;
   print_subst "ev_typsubst" ev.ev_typsubst;
