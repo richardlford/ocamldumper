@@ -45,8 +45,17 @@ let print_locations_flag = ref true
 let print_primitives_flag = ref true
 let print_reloc_info_flag = ref true
 let print_source_flag = ref true
+
+(* If true, only show identifiers in the computational environment *)
+let comp_env_filter_flag = ref true
 (* Extra path to search for source files. *)
 let extra_path = ref ([] : string list)
+
+(* Source file we want to examine *)
+let desired_source_filename = ref ""
+
+(* Tell if included in file filter *)
+let keep_file = ref true;
 
 module Magic_number = Misc.Magic_number
 
@@ -54,6 +63,20 @@ open Lambda
 open Format
 open Opcodes
 open Opnames
+
+let check_file fname =
+  if not (String.equal !desired_source_filename  "") then begin
+    keep_file := (fname = !desired_source_filename)
+  end
+
+let is_desired_loc (loc: Location.t) =
+  let desired = !desired_source_filename in
+  if String.equal desired "" then true
+  else begin
+    let ls = loc.loc_start in
+    let filename = ls.pos_fname in
+    String.equal desired filename
+  end
 
 let () =
   Load_path.init []
@@ -291,7 +314,7 @@ let op_info = [
   opACC6, (Nothing, "accu = sp[6]");
   opACC7, (Nothing, "accu = sp[7]");
   opACC, (Uint, "n=> accu = sp[n]");
-  opPUSH, (Nothing, "");
+  opPUSH, (Nothing, "push accu");
   opPUSHACC0, (Nothing, "push accu; accu = sp[0]");
   opPUSHACC1, (Nothing, "push accu; accu = sp[1]");
   opPUSHACC2, (Nothing, "push accu; accu = sp[2]");
@@ -326,7 +349,7 @@ let op_info = [
   opRESTART, (Nothing, "n=size(env);push env(n-1..3);env=env(2);extra_args+=n-3");
   opGRAB, (Uint, "n=> if(extra_args>=n){extra_args-=n}else{m=1+extra_args;accu=closure with m args, field2=env,code=pc-3, args popped}");
   opCLOSURE, (Uint_Disp, "n,ofs=> if(n>0){push accu};accu=closure of n+1 elements;Code_val(acc)=pc+ofs;arity=0;env offset=2");
-  opCLOSUREREC, (Closurerec, "f,v,o,t=> envofs=f*3-1;bsize=envofs+v;if(v>0){push accu};accu=bsize closure,vars at envofs, code=pc+o; with f-1 Infix blocks (which are pushed)");
+  opCLOSUREREC, (Closurerec, "nvar,[f...]=> accu=closure for f0 and Infix closures for f1..., all sharing the nvars from accu and stack;push closures");
   opOFFSETCLOSUREM3, (Nothing, "accu=&env[-3]");
   opOFFSETCLOSURE0, (Nothing, "accu=env");
   opOFFSETCLOSURE3, (Nothing, "accu=*env[3]");
@@ -344,11 +367,11 @@ let op_info = [
   opATOM, (Uint, "n=> accu = Atom(n)");
   opPUSHATOM0, (Nothing, "push accu; accu = Atom(0)");
   opPUSHATOM, (Uint, "n=> push accu; accu = Atom(n)");
-  opMAKEBLOCK, (Uint_Uint, "n,t=> accu=n-element block with tag t, elements from accu and stack");
+  opMAKEBLOCK, (Uint_Uint, "n,t=> accu=n-element block with tag t, elements from accu and popped stack");
   opMAKEBLOCK1, (Uint, "t=> accu=1-element block, tag t, element from accu");
-  opMAKEBLOCK2, (Uint, "t=> accu=2-element block, tag t, elements from accu and stack");
-  opMAKEBLOCK3, (Uint, "t=> accu=3-element block, tag t, elements from accu and stack");
-  opMAKEFLOATBLOCK, (Uint, "n=> n-element float block, elements from accu and stack");
+  opMAKEBLOCK2, (Uint, "t=> accu=2-element block, tag t, elements from accu and pop");
+  opMAKEBLOCK3, (Uint, "t=> accu=3-element block, tag t, elements from accu and popped stack");
+  opMAKEFLOATBLOCK, (Uint, "n=> n-element float block, elements from accu and popped stack");
   opGETFIELD0, (Nothing, "accu = accu[0]");
   opGETFIELD1, (Nothing, "accu = accu[1]");
   opGETFIELD2, (Nothing, "accu = accu[2]");
@@ -465,6 +488,20 @@ let repr_string ev =
 let get_env ev = 
   Envaux.env_from_summary ev.Instruct.ev_typenv
 
+let in_comp_env (ev: Instruct.debug_event) (id: Ident.t) =
+  if not !comp_env_filter_flag then true else begin
+    let ce : Instruct.compilation_env = ev.ev_compenv in
+    let stack : int Ident.tbl = ce.ce_stack in
+    let heap : int Ident.tbl = ce.ce_heap in
+    let recs : int Ident.tbl = ce.ce_rec in
+    try ignore (Ident.find_same id stack); true;
+    with Not_found -> 
+    try ignore (Ident.find_same id heap); true;
+    with Not_found -> 
+    try ignore (Ident.find_same id recs); true;
+    with Not_found -> false
+end
+
 let print_summary_id title id = 
   printf " %s: " title;
   Ident.print_with_scope std_formatter id;
@@ -519,38 +556,54 @@ let myprint_loc (loc: Location.t)  =
     end
   end
 
-let print_summary_item summary =
-  printf "@.    ";
+let print_summary_item ev summary =
   match summary with
   | Env.Env_empty ->
-      print_summary_string "Env_empty" ""
+      () (*print_summary_string "Env_empty" "" *)
   | Env_value (s, id, vd) ->
-      printf "@[<hov 2>";
-      (* print_summary_id "Env_value" id; *)
-      Xprinttyp.value_description id std_formatter vd;
-      myprint_loc vd.val_loc;
-      printf ",@ ";
-      (*
-      Location.print_loc vd.val_loc;
-      printf ",@ ";
-      *)
-      printf "#atts=%d@ " (List.length vd.val_attributes);
-      printf "@]@;"
-      (* print_value_desc vd; *)
+    let loc = vd.val_loc in
+      if not (is_desired_loc loc) then ()
+      else if not (in_comp_env ev id) then ()
+      else begin
+        printf "@[<hov 2>";
+        (* print_summary_id "Env_value" id; *)
+        let buf = Buffer.create 100 in
+        let ppf = Format.formatter_of_buffer buf in
+        Xprinttyp.value_description id ppf vd;
+        fprintf ppf "@?" ;
+        let bcontent = Buffer.contents buf in
+        printf "%s;@ " bcontent;
+        myprint_loc loc;
+        let num_atts = List.length vd.val_attributes in
+        if num_atts > 0 then begin
+          printf ",@ ";
+          printf "#atts=%d@ " num_atts
+        end;
+        printf "@]@;"
+      end
   | Env_type (s, id, td) ->
-      printf "@[<hov 2>";
-      (* print_summary_id "Env_type" id; *)
-      Xprinttyp.type_declaration id std_formatter td;
-      myprint_loc td.type_loc;
-      printf "@]@;"
+    let loc = td.type_loc in
+      if not (is_desired_loc loc) then ()
+      else begin
+        printf "@[<hov 2>";
+        (* print_summary_id "Env_type" id; *)
+        Xprinttyp.type_declaration id std_formatter td;
+        myprint_loc loc;
+        printf "@]@;";
+      end
   | Env_extension (s, id, ec) ->
-      printf "@[<hov 2>";
-      (* print_summary_id "Env_extension" id; *)
-      Xprinttyp.extension_constructor id std_formatter ec;
-      myprint_loc ec.ext_loc;
-      printf "@]@;"
+    let loc = ec.ext_loc in
+      if not (is_desired_loc loc) then ()
+      else begin
+        printf "@[<hov 2>";
+        (* print_summary_id "Env_extension" id; *)
+        Xprinttyp.extension_constructor id std_formatter ec;
+        myprint_loc ec.ext_loc;
+        printf "@]@;";
+      end
   | Env_module (s, id, mp, md) ->
-      print_summary_id "Env_module" id;
+      if not !comp_env_filter_flag then
+        print_summary_id "Env_module" id;
   | Env_modtype (s, id, md) ->
       print_summary_id "Env_modtype" id;
       Xprinttyp.modtype_declaration id std_formatter md
@@ -559,7 +612,8 @@ let print_summary_item summary =
   | Env_cltype (s, id, ctd) ->
       print_summary_id "Env_cltype" id
   | Env_open (s, p) ->
-      print_summary_string "Env_open" (Path.name p)
+      if not !comp_env_filter_flag then
+        print_summary_string "Env_open" (Path.name p)
   | Env_functor_arg (s, id) ->
       print_summary_id "Env_functor_arg" id
   | Env_constraints (s, cstrs) ->
@@ -569,17 +623,19 @@ let print_summary_item summary =
   | Env_persistent (s, id) ->
       print_summary_id "Env_persistent" id
   | Env.Env_value_unbound (s, n, r) ->
-      print_summary_string "Env_value_unbound" 
-      (String.concat " " [n; "reason"])
+      if not !comp_env_filter_flag then begin
+        print_summary_string "Env_value_unbound" 
+        (String.concat " " [n; "reason"])
+      end
   | Env_module_unbound (s, n, r) ->
       print_summary_string "Env_module_unbound" 
       (String.concat " " [n; "reason"])
 
-let rec print_summary summary =
-  print_summary_item summary;
+let rec print_summary ev summary =
+  print_summary_item ev summary;
   match next_summary summary with
   | None -> ()
-  | Some s -> print_summary s
+  | Some s -> print_summary ev s
 
 let print_ident_tbl  (title: string) (tbl: int Ident.tbl) =
   if tbl = Ident.empty then begin
@@ -672,14 +728,14 @@ type debug_event =
 let print_ev (ev: Instruct.debug_event) =
   if !print_source_flag then
     Show_source.show_point ev true;
-  printf "pc=%d,@ " ev.Instruct.ev_pos;
+  printf "pc=%d(=4*%d),@ " ev.Instruct.ev_pos (ev.Instruct.ev_pos/4 );
   printf "ev_module=%s" ev.Instruct.ev_module;
   myprint_loc ev.ev_loc;
   printf ",@ ev_kind=%s,@ " (kind_string ev);
   printf "ev_defname=%s,@ " ev.ev_defname;
   printf "ev_info=%s,@ " (info_string ev);
   printf "ev_typenv={@;@[";
-  print_summary (get_substituted_summary ev);
+  print_summary ev (get_substituted_summary ev);
   printf "}@;@]@.";
   print_comp_env ev.ev_compenv;
   print_subst "ev_typsubst" ev.ev_typsubst;
@@ -688,18 +744,23 @@ let print_ev (ev: Instruct.debug_event) =
   ()
 
 let print_event (ev: Instruct.debug_event) =
-  if !print_full_events_flag then
-    print_ev ev
-  else if !print_locations_flag then
-    let ls = ev.ev_loc.loc_start in
-    let le = ev.ev_loc.loc_end in
-    printf "Def %s, File \"%s\", line %d, characters %d-%d:@." 
-    ev.ev_defname
-    ls.Lexing.pos_fname
-      ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
-      (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
-    if !print_source_flag then
-      Show_source.show_point ev true
+  let ls = ev.ev_loc.loc_start in
+  let fname = ls.Lexing.pos_fname in
+  check_file fname;
+  if !keep_file then begin
+    if !print_full_events_flag then
+      print_ev ev
+    else if !print_locations_flag then
+      let le = ev.ev_loc.loc_end in
+      printf "Def %s, File \"%s\", line %d, characters %d-%d:@." 
+      ev.ev_defname
+      fname
+        ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
+        (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
+      if !print_source_flag then
+        Show_source.show_point ev true
+  end
+
 
 let print_ev_indexed (ev: Instruct.debug_event)  j =
   printf "@[<2>ev[%d]:{@ " j;
@@ -782,6 +843,8 @@ let print_instr ic =
   with Not_found -> pp_print_string ppf " (unknown arguments)"
   end;
   fprintf ppf "@?";
+  if not !keep_file then ()
+  else
   let line = Buffer.contents buf in
   if !print_description_flag then begin
     let llen = String.length line in
@@ -1359,6 +1422,11 @@ let arg_list = [
     " Print module approximation information";
   "-no-approx", Arg.Clear print_approx_flag,
     " Do not print module approximation information";
+  "-ce-filter", Arg.Set comp_env_filter_flag,
+    " Only show environment in the computational environment,
+      that is, what is available in the debugger";
+  "-no-ce-filter", Arg.Clear comp_env_filter_flag,
+    " Do no filter using the computational environment";
   "-code", Arg.Set print_code_flag,
     " Print bytecode or code from exported flambda functions";
   "-no-code", Arg.Clear print_code_flag,
@@ -1411,6 +1479,8 @@ let arg_list = [
   "-no-reloc", Arg.Clear print_reloc_info_flag, " Do not print relocation information for the code";
   "-source", Arg.Set print_source_flag, " Print source with code";
   "-no-source", Arg.Clear print_source_flag, " Do not print source with code";
+  "-src-filter", Arg.Set_string desired_source_filename, 
+    "'-src_filter src' only shows instructions for events related to src";
   "-all", Arg.Unit print_all,
     "Enable all print options";
   "-none", Arg.Unit print_none,
