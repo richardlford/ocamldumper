@@ -52,9 +52,9 @@ let show_point ev selected =
     ignore(print_line buffer pos.Lexing.pos_lnum start point before)
   with
     Out_of_range -> (* point_of_coord *)
-      prerr_endline "Position out of range."
+      () (* prerr_endline "Position out of range." *)
   | Not_found    -> (* Events.get_pos || get_buffer *)
-      prerr_endline ("No source file for " ^ mdle ^ ".")
+      () (*prerr_endline ("No source file for " ^ mdle ^ ".") *)
   end
 
 (* Display part of the source. *)

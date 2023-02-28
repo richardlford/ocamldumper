@@ -34,6 +34,7 @@ let print_approx_flag = ref true
 let print_code_flag = ref true
 let print_crc_flag = ref true
 let print_debug_flag = ref true
+let print_description_flag = ref true
 let print_dirs_flag = ref true
 let print_dlls_flag = ref true
 let print_dll_paths_flag = ref true
@@ -44,6 +45,8 @@ let print_locations_flag = ref true
 let print_primitives_flag = ref true
 let print_reloc_info_flag = ref true
 let print_source_flag = ref true
+(* Extra path to search for source files. *)
+let extra_path = ref ([] : string list)
 
 module Magic_number = Misc.Magic_number
 
@@ -107,73 +110,73 @@ let print_float f =
   else printf "%s." f
 ;;
 
-let rec print_struct_const = function
-    Const_base(Const_int i) -> printf "%d" i
+let rec print_struct_const ppf = function
+    Const_base(Const_int i) -> fprintf ppf "%d" i
   | Const_base(Const_float f) -> print_float f
-  | Const_base(Const_string (s, _, _)) -> printf "%S" s
-  | Const_immstring s -> printf "%S" s
-  | Const_base(Const_char c) -> printf "%C" c
-  | Const_base(Const_int32 i) -> printf "%ldl" i
-  | Const_base(Const_nativeint i) -> printf "%ndn" i
-  | Const_base(Const_int64 i) -> printf "%LdL" i
+  | Const_base(Const_string (s, _, _)) -> fprintf ppf "%S" s
+  | Const_immstring s -> fprintf ppf "%S" s
+  | Const_base(Const_char c) -> fprintf ppf "%C" c
+  | Const_base(Const_int32 i) -> fprintf ppf "%ldl" i
+  | Const_base(Const_nativeint i) -> fprintf ppf "%ndn" i
+  | Const_base(Const_int64 i) -> fprintf ppf "%LdL" i
   | Const_block(tag, args) ->
-      printf "<%d>" tag;
+      fprintf ppf "<%d>" tag;
       begin match args with
         [] -> ()
       | [a1] ->
-          printf "("; print_struct_const a1; printf ")"
+          fprintf ppf "("; print_struct_const ppf a1; fprintf ppf ")"
       | a1::al ->
-          printf "("; print_struct_const a1;
-          List.iter (fun a -> printf ", "; print_struct_const a) al;
-          printf ")"
+          fprintf ppf "("; print_struct_const ppf a1;
+          List.iter (fun a -> fprintf ppf ", "; print_struct_const ppf a) al;
+          fprintf ppf ")"
       end
   | Const_float_array a ->
-      printf "[|";
-      List.iter (fun f -> print_float f; printf "; ") a;
-      printf "|]"
+      fprintf ppf "[|";
+      List.iter (fun f -> print_float f; fprintf ppf "; ") a;
+      fprintf ppf "|]"
 
 (* Print an obj *)
 
 let same_custom x y =
   Obj.field x 0 = Obj.field (Obj.repr y) 0
 
-let rec print_obj x =
+let rec print_obj ppf x =
   if Obj.is_block x then begin
     let tag = Obj.tag x in
     if tag = Obj.string_tag then
-        printf "%S" (Obj.magic x : string)
+        fprintf ppf "%S" (Obj.magic x : string)
     else if tag = Obj.double_tag then
-        printf "%.12g" (Obj.magic x : float)
+        fprintf ppf "%.12g" (Obj.magic x : float)
     else if tag = Obj.double_array_tag then begin
         let a = (Obj.magic x : floatarray) in
-        printf "[|";
+        fprintf ppf "[|";
         for i = 0 to Array.Floatarray.length a - 1 do
-          if i > 0 then printf ", ";
-          printf "%.12g" (Array.Floatarray.get a i)
+          if i > 0 then fprintf ppf ", ";
+          fprintf ppf "%.12g" (Array.Floatarray.get a i)
         done;
-        printf "|]"
+        fprintf ppf "|]"
     end else if tag = Obj.custom_tag && same_custom x 0l then
-        printf "%ldl" (Obj.magic x : int32)
+        fprintf ppf "%ldl" (Obj.magic x : int32)
     else if tag = Obj.custom_tag && same_custom x 0n then
-        printf "%ndn" (Obj.magic x : nativeint)
+        fprintf ppf "%ndn" (Obj.magic x : nativeint)
     else if tag = Obj.custom_tag && same_custom x 0L then
-        printf "%LdL" (Obj.magic x : int64)
+        fprintf ppf "%LdL" (Obj.magic x : int64)
     else if tag < Obj.no_scan_tag then begin
-        printf "<%d>" (Obj.tag x);
+        fprintf ppf "<%d>" (Obj.tag x);
         match Obj.size x with
           0 -> ()
         | 1 ->
-            printf "("; print_obj (Obj.field x 0); printf ")"
+            fprintf ppf "("; print_obj ppf (Obj.field x 0); fprintf ppf ")"
         | n ->
-            printf "("; print_obj (Obj.field x 0);
+            fprintf ppf "("; print_obj ppf (Obj.field x 0);
             for i = 1 to n - 1 do
-              printf ", "; print_obj (Obj.field x i)
+              fprintf ppf ", "; print_obj ppf (Obj.field x i)
             done;
-            printf ")"
+            fprintf ppf ")"
     end else
-        printf "<tag %d>" tag
+        fprintf ppf "<tag %d>" tag
   end else
-    printf "%d" (Obj.magic x : int)
+    fprintf ppf "%d" (Obj.magic x : int)
 
 (* Current position in input file *)
 
@@ -191,67 +194,67 @@ let find_reloc ic =
 
 (* Symbolic printing of global names, etc *)
 
-let print_global item =
+let print_global ppf item =
   match item with
-    Global id -> print_string(Ident.name id)
-  | Constant obj -> print_obj obj
-  | _ -> print_string "???"
+    Global id -> pp_print_string ppf (Ident.name id)
+  | Constant obj -> print_obj ppf obj
+  | _ -> pp_print_string ppf "???"
 
-let print_getglobal_name ic =
+let print_getglobal_name ppf ic =
   if !objfile then begin
     begin try
       match find_reloc ic with
-          Reloc_getglobal id -> print_string (Ident.name id)
-        | Reloc_literal sc -> print_struct_const sc
-        | _ -> print_string "<wrong reloc>"
+          Reloc_getglobal id -> pp_print_string ppf (Ident.name id)
+        | Reloc_literal sc -> print_struct_const ppf sc
+        | _ -> pp_print_string ppf "<wrong reloc>"
     with Not_found ->
-      print_string "<no reloc>"
+      pp_print_string ppf "<no reloc>"
     end;
     ignore (inputu ic);
   end
   else begin
     let n = inputu ic in
     if n >= Array.length !globals || n < 0
-    then print_string "<global table overflow>"
-    else print_global !globals.(n) 
+    then pp_print_string ppf "<global table overflow>"
+    else print_global ppf !globals.(n) 
   end
 
-let print_setglobal_name ic =
+let print_setglobal_name ppf ic =
   if !objfile then begin
     begin try
       match find_reloc ic with
-        Reloc_setglobal id -> print_string (Ident.name id)
-      | _ -> print_string "<wrong reloc>"
+        Reloc_setglobal id -> pp_print_string ppf (Ident.name id)
+      | _ -> pp_print_string ppf "<wrong reloc>"
     with Not_found ->
-      print_string "<no reloc>"
+      pp_print_string ppf "<no reloc>"
     end;
     ignore (inputu ic);
   end
   else begin
     let n = inputu ic in
     if n >= Array.length !globals || n < 0
-    then print_string "<global table overflow>"
+    then pp_print_string ppf "<global table overflow>"
     else match !globals.(n) with
-           Global id -> print_string(Ident.name id)
-         | _ -> print_string "???"
+           Global id -> pp_print_string ppf (Ident.name id)
+         | _ -> pp_print_string ppf "???"
   end
 
-let print_primitive ic =
+let print_primitive ppf ic =
   if !objfile then begin
     begin try
       match find_reloc ic with
-        Reloc_primitive s -> print_string s
-      | _ -> print_string "<wrong reloc>"
+        Reloc_primitive s -> pp_print_string ppf s
+      | _ -> pp_print_string ppf "<wrong reloc>"
     with Not_found ->
-      print_string "<no reloc>"
+      pp_print_string ppf "<no reloc>"
     end;
     ignore (inputu ic);
   end
   else begin
     let n = inputu ic in
     if n >= Array.length !primitives || n < 0
-    then print_int n
-    else print_string !primitives.(n)
+    then pp_print_int ppf n
+    else pp_print_string ppf !primitives.(n)
   end
 
   (* Disassemble one instruction *)
@@ -277,157 +280,157 @@ type shape =
   | Pubmet
 ;;
 
-
-let op_shapes = [
-  opACC0, Nothing;
-  opACC1, Nothing;
-  opACC2, Nothing;
-  opACC3, Nothing;
-  opACC4, Nothing;
-  opACC5, Nothing;
-  opACC6, Nothing;
-  opACC7, Nothing;
-  opACC, Uint;
-  opPUSH, Nothing;
-  opPUSHACC0, Nothing;
-  opPUSHACC1, Nothing;
-  opPUSHACC2, Nothing;
-  opPUSHACC3, Nothing;
-  opPUSHACC4, Nothing;
-  opPUSHACC5, Nothing;
-  opPUSHACC6, Nothing;
-  opPUSHACC7, Nothing;
-  opPUSHACC, Uint;
-  opPOP, Uint;
-  opASSIGN, Uint;
-  opENVACC1, Nothing;
-  opENVACC2, Nothing;
-  opENVACC3, Nothing;
-  opENVACC4, Nothing;
-  opENVACC, Uint;
-  opPUSHENVACC1, Nothing;
-  opPUSHENVACC2, Nothing;
-  opPUSHENVACC3, Nothing;
-  opPUSHENVACC4, Nothing;
-  opPUSHENVACC, Uint;
-  opPUSH_RETADDR, Disp;
-  opAPPLY, Uint;
-  opAPPLY1, Nothing;
-  opAPPLY2, Nothing;
-  opAPPLY3, Nothing;
-  opAPPTERM, Uint_Uint;
-  opAPPTERM1, Uint;
-  opAPPTERM2, Uint;
-  opAPPTERM3, Uint;
-  opRETURN, Uint;
-  opRESTART, Nothing;
-  opGRAB, Uint;
-  opCLOSURE, Uint_Disp;
-  opCLOSUREREC, Closurerec;
-  opOFFSETCLOSUREM3, Nothing;
-  opOFFSETCLOSURE0, Nothing;
-  opOFFSETCLOSURE3, Nothing;
-  opOFFSETCLOSURE, Sint;  (* was Uint *)
-  opPUSHOFFSETCLOSUREM3, Nothing;
-  opPUSHOFFSETCLOSURE0, Nothing;
-  opPUSHOFFSETCLOSURE3, Nothing;
-  opPUSHOFFSETCLOSURE, Sint; (* was Nothing *)
-  opGETGLOBAL, Getglobal;
-  opPUSHGETGLOBAL, Getglobal;
-  opGETGLOBALFIELD, Getglobal_Uint;
-  opPUSHGETGLOBALFIELD, Getglobal_Uint;
-  opSETGLOBAL, Setglobal;
-  opATOM0, Nothing;
-  opATOM, Uint;
-  opPUSHATOM0, Nothing;
-  opPUSHATOM, Uint;
-  opMAKEBLOCK, Uint_Uint;
-  opMAKEBLOCK1, Uint;
-  opMAKEBLOCK2, Uint;
-  opMAKEBLOCK3, Uint;
-  opMAKEFLOATBLOCK, Uint;
-  opGETFIELD0, Nothing;
-  opGETFIELD1, Nothing;
-  opGETFIELD2, Nothing;
-  opGETFIELD3, Nothing;
-  opGETFIELD, Uint;
-  opGETFLOATFIELD, Uint;
-  opSETFIELD0, Nothing;
-  opSETFIELD1, Nothing;
-  opSETFIELD2, Nothing;
-  opSETFIELD3, Nothing;
-  opSETFIELD, Uint;
-  opSETFLOATFIELD, Uint;
-  opVECTLENGTH, Nothing;
-  opGETVECTITEM, Nothing;
-  opSETVECTITEM, Nothing;
-  opGETSTRINGCHAR, Nothing;
-  opGETBYTESCHAR, Nothing;
-  opSETBYTESCHAR, Nothing;
-  opBRANCH, Disp;
-  opBRANCHIF, Disp;
-  opBRANCHIFNOT, Disp;
-  opSWITCH, Switch;
-  opBOOLNOT, Nothing;
-  opPUSHTRAP, Disp;
-  opPOPTRAP, Nothing;
-  opRAISE, Nothing;
-  opCHECK_SIGNALS, Nothing;
-  opC_CALL1, Primitive;
-  opC_CALL2, Primitive;
-  opC_CALL3, Primitive;
-  opC_CALL4, Primitive;
-  opC_CALL5, Primitive;
-  opC_CALLN, Uint_Primitive;
-  opCONST0, Nothing;
-  opCONST1, Nothing;
-  opCONST2, Nothing;
-  opCONST3, Nothing;
-  opCONSTINT, Sint;
-  opPUSHCONST0, Nothing;
-  opPUSHCONST1, Nothing;
-  opPUSHCONST2, Nothing;
-  opPUSHCONST3, Nothing;
-  opPUSHCONSTINT, Sint;
-  opNEGINT, Nothing;
-  opADDINT, Nothing;
-  opSUBINT, Nothing;
-  opMULINT, Nothing;
-  opDIVINT, Nothing;
-  opMODINT, Nothing;
-  opANDINT, Nothing;
-  opORINT, Nothing;
-  opXORINT, Nothing;
-  opLSLINT, Nothing;
-  opLSRINT, Nothing;
-  opASRINT, Nothing;
-  opEQ, Nothing;
-  opNEQ, Nothing;
-  opLTINT, Nothing;
-  opLEINT, Nothing;
-  opGTINT, Nothing;
-  opGEINT, Nothing;
-  opOFFSETINT, Sint;
-  opOFFSETREF, Sint;
-  opISINT, Nothing;
-  opGETMETHOD, Nothing;
-  opGETDYNMET, Nothing;
-  opGETPUBMET, Pubmet;
-  opBEQ, Sint_Disp;
-  opBNEQ, Sint_Disp;
-  opBLTINT, Sint_Disp;
-  opBLEINT, Sint_Disp;
-  opBGTINT, Sint_Disp;
-  opBGEINT, Sint_Disp;
-  opULTINT, Nothing;
-  opUGEINT, Nothing;
-  opBULTINT, Uint_Disp;
-  opBUGEINT, Uint_Disp;
-  opSTOP, Nothing;
-  opEVENT, Nothing;
-  opBREAK, Nothing;
-  opRERAISE, Nothing;
-  opRAISE_NOTRACE, Nothing;
+(* Shape and description of each opcode *)
+let op_info = [
+  opACC0, (Nothing, "accu = sp[0]");
+  opACC1, (Nothing, "accu = sp[1]");
+  opACC2, (Nothing, "accu = sp[2]");
+  opACC3, (Nothing, "accu = sp[3]");
+  opACC4, (Nothing, "accu = sp[4]");
+  opACC5, (Nothing, "accu = sp[5]");
+  opACC6, (Nothing, "accu = sp[6]");
+  opACC7, (Nothing, "accu = sp[7]");
+  opACC, (Uint, "n=> accu = sp[n]");
+  opPUSH, (Nothing, "");
+  opPUSHACC0, (Nothing, "push accu; accu = sp[0]");
+  opPUSHACC1, (Nothing, "push accu; accu = sp[1]");
+  opPUSHACC2, (Nothing, "push accu; accu = sp[2]");
+  opPUSHACC3, (Nothing, "push accu; accu = sp[3]");
+  opPUSHACC4, (Nothing, "push accu; accu = sp[4]");
+  opPUSHACC5, (Nothing, "push accu; accu = sp[5]");
+  opPUSHACC6, (Nothing, "push accu; accu = sp[6]");
+  opPUSHACC7, (Nothing, "push accu; accu = sp[7]");
+  opPUSHACC, (Uint, "n=> push accu; accu = sp[n]");
+  opPOP, (Uint, "n=> pop  items from the stack");
+  opASSIGN, (Uint, "n=> sp[n] = accu; accu = ()");
+  opENVACC1, (Nothing, "accu = env(1)");
+  opENVACC2, (Nothing, "accu = env(2)");
+  opENVACC3, (Nothing, "accu = env(3)");
+  opENVACC4, (Nothing, "accu = env(4)");
+  opENVACC, (Uint, "n=> accu = env(n)");
+  opPUSHENVACC1, (Nothing, "push accu; accu = env(1)");
+  opPUSHENVACC2, (Nothing, "push accu; accu = env(2)");
+  opPUSHENVACC3, (Nothing, "push accu; accu = env(3)");
+  opPUSHENVACC4, (Nothing, "push accu; accu = env(4)");
+  opPUSHENVACC, (Uint, "push accu; accu = env(*pc++)");
+  opPUSH_RETADDR, (Disp, "n=> push pc+n; push env; push extra_args");
+  opAPPLY, (Uint, "n=> extra_args = n - 1; pc = Code_val(accu); env = accu;");
+  opAPPLY1, (Nothing, "arg1 = pop; push extra_args, env, pc, arg1; pc = Code_val(accu); env = accu; extra_args = 0");
+  opAPPLY2, (Nothing, "arg1,arg2 = pops; push extra_args, env, pc, arg2, arg1; pc = Code_val(accu); env = accu; extra_args = 1");
+  opAPPLY3, (Nothing, "arg1,arg2,arg3 = pops; push extra_args, env, pc, arg3, arg2, arg1; pc = Code_val(accu); env = accu; extra_args = 2");
+  opAPPTERM, (Uint_Uint, "n,s=> sp[0..s-1]=sp[0..n-1];pc = Code_val(accu); env = accu; extra_args += n-1");
+  opAPPTERM1, (Uint, "n=> arg1=pop;pop n-1 items; push arg1;pc = Code_val(accu); env = accu");
+  opAPPTERM2, (Uint, "n=> arg1,arg2=pops;pop n-2 items; push arg2,arg1;pc = Code_val(accu); env = accu;extra_args++");
+  opAPPTERM3, (Uint, "n=> arg1,arg2,arg3=pops;pop n-3 items; push arg3,arg2,arg1;pc = Code_val(accu); env = accu;extra_args+=2");
+  opRETURN, (Uint, "n=> pop n elements; if(extra_args> 0){extra_args--;pc=Code_val(accu);env = accu}else{pc,env,extra_args=pops}");
+  opRESTART, (Nothing, "n=size(env);push env(n-1..3);env=env(2);extra_args+=n-3");
+  opGRAB, (Uint, "n=> if(extra_args>=n){extra_args-=n}else{m=1+extra_args;accu=closure with m args, field2=env,code=pc-3, args popped}");
+  opCLOSURE, (Uint_Disp, "n,ofs=> if(n>0){push accu};accu=closure of n+1 elements;Code_val(acc)=pc+ofs;arity=0;env offset=2");
+  opCLOSUREREC, (Closurerec, "f,v,o,t=> envofs=f*3-1;bsize=envofs+v;if(v>0){push accu};accu=bsize closure,vars at envofs, code=pc+o; with f-1 Infix blocks (which are pushed)");
+  opOFFSETCLOSUREM3, (Nothing, "accu=&env[-3]");
+  opOFFSETCLOSURE0, (Nothing, "accu=env");
+  opOFFSETCLOSURE3, (Nothing, "accu=*env[3]");
+  opOFFSETCLOSURE, (Sint, "n=> accu=&env[n]");  (* was Uint *)
+  opPUSHOFFSETCLOSUREM3, (Nothing, "push accu;accu=&env[-3]");
+  opPUSHOFFSETCLOSURE0, (Nothing, "push accu;accu=env");
+  opPUSHOFFSETCLOSURE3, (Nothing, "push accu;accu=*env[3]");
+  opPUSHOFFSETCLOSURE, (Sint, "n=> push accu;accu=&env[n]"); (* was Nothing *)
+  opGETGLOBAL, (Getglobal, "n=> accu=global[n]");
+  opPUSHGETGLOBAL, (Getglobal, "n=> push accu; accu=global[n]");
+  opGETGLOBALFIELD, (Getglobal_Uint, "n,p=> accu=global[n][p]");
+  opPUSHGETGLOBALFIELD, (Getglobal_Uint, "n,p=> push accu;accu=global[n][p]");
+  opSETGLOBAL, (Setglobal, "n=> global[n]=accu; accu=()");
+  opATOM0, (Nothing, "accu = Atom(0)");
+  opATOM, (Uint, "n=> accu = Atom(n)");
+  opPUSHATOM0, (Nothing, "push accu; accu = Atom(0)");
+  opPUSHATOM, (Uint, "n=> push accu; accu = Atom(n)");
+  opMAKEBLOCK, (Uint_Uint, "n,t=> accu=n-element block with tag t, elements from accu and stack");
+  opMAKEBLOCK1, (Uint, "t=> accu=1-element block, tag t, element from accu");
+  opMAKEBLOCK2, (Uint, "t=> accu=2-element block, tag t, elements from accu and stack");
+  opMAKEBLOCK3, (Uint, "t=> accu=3-element block, tag t, elements from accu and stack");
+  opMAKEFLOATBLOCK, (Uint, "n=> n-element float block, elements from accu and stack");
+  opGETFIELD0, (Nothing, "accu = accu[0]");
+  opGETFIELD1, (Nothing, "accu = accu[1]");
+  opGETFIELD2, (Nothing, "accu = accu[2]");
+  opGETFIELD3, (Nothing, "accu = accu[3]");
+  opGETFIELD, (Uint, "n=> accu = accu[n]");
+  opGETFLOATFIELD, (Uint, "n=> accu=Double Block with DoubleField(accu, n)");
+  opSETFIELD0, (Nothing, "accu[0] = pop; accu=()");
+  opSETFIELD1, (Nothing, "accu[1] = pop; accu=()");
+  opSETFIELD2, (Nothing, "accu[2] = pop; accu=()");
+  opSETFIELD3, (Nothing, "accu[3] = pop; accu=()");
+  opSETFIELD, (Uint, "n=> accu[n] = pop; accu=()");
+  opSETFLOATFIELD, (Uint, "DoubleField(accu, n) = pop; accu=()");
+  opVECTLENGTH, (Nothing, "accu = size of block in accu (/2 if Double array)");
+  opGETVECTITEM, (Nothing, "n=pop; accu=accu[n]");
+  opSETVECTITEM, (Nothing, "n=pop;v=pop;accu[n]=v");
+  opGETSTRINGCHAR, (Nothing, "n=pop; accu = nth unsigned char of accu string");
+  opGETBYTESCHAR, (Nothing, "n=pop; accu = nth unsigned char of accu string");
+  opSETBYTESCHAR, (Nothing, "n=pop;v=pop; nth unsigned char of accu set to v");
+  opBRANCH, (Disp, "ofs=> pc += ofs");
+  opBRANCHIF, (Disp, "ofs=> if(accu != false){pc += ofs}");
+  opBRANCHIFNOT, (Disp, "ofs=> if(accu == false){pc += ofs}");
+  opSWITCH, (Switch, "n=> tab=pc;szt=n>>16;szl=n&0xffff;if(Is_block(accu)){ix=Tag_val(accu);pc += tab[szl+ix]}else{pc += tab[accu]");
+  opBOOLNOT, (Nothing, "accu = not accu");
+  opPUSHTRAP, (Disp, "ofs=> push extra_args, env, trap_sp_offset, pc+ofs");
+  opPOPTRAP, (Nothing, "pop;trap_sp_offset=pop;pop;pop");
+  opRAISE, (Nothing, "if(no frame){stop}else{sp=trapsp;pop pc,trapsp,env,extra_args}");
+  opCHECK_SIGNALS, (Nothing, "Handle signals, if any. accu not preserved.");
+  opC_CALL1, (Primitive, "p=> accu=primitive(p)(accu)");
+  opC_CALL2, (Primitive, "p=> accu=primitive(p)(accu, pop)");
+  opC_CALL3, (Primitive, "p=> accu=primitive(p)(accu, pop, pop)");
+  opC_CALL4, (Primitive, "p=> accu=primitive(p)(accu, pop, pop, pop)");
+  opC_CALL5, (Primitive, "p=> accu=primitive(p)(accu, pop, pop, pop, pop)");
+  opC_CALLN, (Uint_Primitive, "n,p=> accu=primitive(p)(accu, (n-1)-pops");
+  opCONST0, (Nothing, "accu = 0");
+  opCONST1, (Nothing, "accu = 1");
+  opCONST2, (Nothing, "accu = 2");
+  opCONST3, (Nothing, "accu = 3");
+  opCONSTINT, (Sint, "n=> accu = n");
+  opPUSHCONST0, (Nothing, "push accu; accu = 0");
+  opPUSHCONST1, (Nothing, "push accu; accu = 1");
+  opPUSHCONST2, (Nothing, "push accu; accu = 2");
+  opPUSHCONST3, (Nothing, "push accu; accu = 3");
+  opPUSHCONSTINT, (Sint, "n=> push accu; accu = n");
+  opNEGINT, (Nothing, "accu = -accu");
+  opADDINT, (Nothing, "accu = accu + pop");
+  opSUBINT, (Nothing, "accu = accu - pop");
+  opMULINT, (Nothing, "accu = accu * pop");
+  opDIVINT, (Nothing, "accu = accu / pop.");
+  opMODINT, (Nothing, "accu = accu % pop");
+  opANDINT, (Nothing, "accu = accu & pop");
+  opORINT, (Nothing, "accu = accu | pop");
+  opXORINT, (Nothing, "accu = accu ^ pop");
+  opLSLINT, (Nothing, "accu = accu << pop");
+  opLSRINT, (Nothing, "accu = (unsigned)accu >> pop");
+  opASRINT, (Nothing, "accu = (signed)accu >> pop ");
+  opEQ, (Nothing, "accu = accu == pop");
+  opNEQ, (Nothing, "accu = accu != pop");
+  opLTINT, (Nothing, "accu = accu < pop");
+  opLEINT, (Nothing, "accu = accu <= pop");
+  opGTINT, (Nothing, "accu = accu > pop");
+  opGEINT, (Nothing, "accu = accu >= pop");
+  opOFFSETINT, (Sint, "ofs=> accu += ofs");
+  opOFFSETREF, (Sint, "ofs=> accu[0] += ofs");
+  opISINT, (Nothing, "accu = Val_long(accu & 1)");
+  opGETMETHOD, (Nothing, "x=pop;y=x[0];accu = y[accu]");
+  opGETDYNMET, (Nothing, "object=sp[0];accu=method matching tag in object's method table");
+  opGETPUBMET, (Pubmet, "tag,cache=> object=accu;methods=object[0];push object;accu=method matching tag in methods;");
+  opBEQ, (Sint_Disp, "val,ofs=> val == (signed)accu){pc += ofs}");
+  opBNEQ, (Sint_Disp, "val,ofs=> if(val != (signed)accu){pc += ofs}");
+  opBLTINT, (Sint_Disp, "val,ofs=> if(val < (signed)accu){pc += ofs}");
+  opBLEINT, (Sint_Disp, "val,ofs=> if(val <= (signed)accu){pc += ofs}");
+  opBGTINT, (Sint_Disp, "val,ofs=> if(val > (signed)accu){pc += ofs}");
+  opBGEINT, (Sint_Disp, "val,ofs=> if(val >= (signed)accu){pc += ofs}");
+  opULTINT, (Nothing, "accu < (unsigned)pop");
+  opUGEINT, (Nothing, "accu >= (unsigned)pop");
+  opBULTINT, (Uint_Disp, "val,ofs=> if(val < (unsigned)accu){pc += ofs}");
+  opBUGEINT, (Uint_Disp, "val,ofs=> if(val >= (unsigned)accu){pc += ofs}");
+  opSTOP, (Nothing, "Stop interpreting, return accu");
+  opEVENT, (Nothing, "if(--caml_event_count==0){send event message to debugger}");
+  opBREAK, (Nothing, "Send break message to debugger");
+  opRERAISE, (Nothing, "Like Raise, but backtrace slightly different");
+  opRAISE_NOTRACE, (Nothing, "Raise but do not record backtrace.");
 ];;
 
 (* Dump relocation info *)
@@ -435,7 +438,7 @@ let op_shapes = [
 let print_reloc (info, pos) =
   printf "    %d    (%d)    " pos (pos/4);
   match info with
-    Reloc_literal sc -> print_struct_const sc; printf "@."
+    Reloc_literal sc -> print_struct_const std_formatter sc; printf "@."
   | Reloc_getglobal id -> printf "require    %s@." (Ident.name id)
   | Reloc_setglobal id -> printf "provide    %s@." (Ident.name id)
   | Reloc_primitive s -> printf "prim    %s@." s
@@ -717,62 +720,78 @@ let dump_eventlist evl =
 let print_instr ic =
   let pos = currpos ic in
   List.iter print_event (Hashtbl.find_all event_table pos);
-  printf "%8d  " (pos / 4);
+  let buf = Buffer.create 100 in
+  let ppf = Format.formatter_of_buffer buf in
+  let descr = ref "" in
+  fprintf ppf "%8d  " (pos / 4);
   let op = inputu ic in
   if op >= Array.length Opnames.names_of_instructions || op < 0
-  then (print_string "*** unknown opcode : "; print_int op)
-  else print_string names_of_instructions.(op);
+  then (pp_print_string ppf "*** unknown opcode : "; pp_print_int ppf op)
+  else pp_print_string ppf names_of_instructions.(op);
   begin try
-    let shape = List.assoc op op_shapes in
-    if shape <> Nothing then print_string " ";
+    let info = List.assoc op op_info in
+    let shape = fst info in
+    descr := snd info;
+    begin
+    if shape <> Nothing then pp_print_string ppf " ";
     match shape with
-    | Uint -> print_int (inputu ic)
-    | Sint -> print_int (inputs ic)
+    | Uint -> pp_print_int ppf (inputu ic)
+    | Sint -> pp_print_int ppf (inputs ic)
     | Uint_Uint
-       -> print_int (inputu ic); print_string ", "; print_int (inputu ic)
-    | Disp -> let p = currpc ic in print_int (p + inputs ic)
+       -> pp_print_int ppf (inputu ic); pp_print_string ppf ", "; pp_print_int ppf (inputu ic)
+    | Disp -> let p = currpc ic in pp_print_int ppf (p + inputs ic)
     | Uint_Disp
-       -> print_int (inputu ic); print_string ", ";
-          let p = currpc ic in print_int (p + inputs ic)
+       -> pp_print_int ppf (inputu ic); pp_print_string ppf ", ";
+          let p = currpc ic in pp_print_int ppf (p + inputs ic)
     | Sint_Disp
-       -> print_int (inputs ic); print_string ", ";
-          let p = currpc ic in print_int (p + inputs ic)
-    | Getglobal -> print_getglobal_name ic
+       -> pp_print_int ppf (inputs ic); pp_print_string ppf ", ";
+          let p = currpc ic in pp_print_int ppf (p + inputs ic)
+    | Getglobal -> print_getglobal_name ppf ic
     | Getglobal_Uint
-       -> print_getglobal_name ic; print_string ", "; print_int (inputu ic)
-    | Setglobal -> print_setglobal_name ic
-    | Primitive -> print_primitive ic
+       -> print_getglobal_name ppf ic; pp_print_string ppf ", "; pp_print_int ppf (inputu ic)
+    | Setglobal -> print_setglobal_name ppf ic
+    | Primitive -> print_primitive ppf ic
     | Uint_Primitive
-       -> print_int(inputu ic); print_string ", "; print_primitive ic
+       -> pp_print_int ppf (inputu ic); pp_print_string ppf ", "; print_primitive ppf ic
     | Switch
        -> let n = inputu ic in
           let orig = currpc ic in
           for i = 0 to (n land 0xFFFF) - 1 do
-            printf "@.        int "; print_int i; print_string " -> ";
-            print_int(orig + inputs ic);
+            fprintf ppf "@.        int "; pp_print_int ppf i; pp_print_string ppf " -> ";
+            pp_print_int ppf(orig + inputs ic);
           done;
           for i = 0 to (n lsr 16) - 1 do
-            printf "@.        tag "; print_int i; print_string " -> ";
-            print_int(orig + inputs ic);
+            fprintf ppf "@.        tag "; pp_print_int ppf i; pp_print_string ppf " -> ";
+            pp_print_int ppf(orig + inputs ic);
           done;
     | Closurerec
        -> let nfuncs = inputu ic in
           let nvars = inputu ic in
           let orig = currpc ic in
-          print_int nvars;
+          pp_print_int ppf nvars;
           for _i = 0 to nfuncs - 1 do
-            print_string ", ";
-            print_int (orig + inputs ic);
+            pp_print_string ppf ", ";
+            pp_print_int ppf (orig + inputs ic);
           done;
     | Pubmet
        -> let tag = inputs ic in
           let _cache = inputu ic in
-          print_int tag
-    | Nothing -> ()
-  with Not_found -> print_string " (unknown arguments)"
+          pp_print_int ppf tag
+    | Nothing -> ();
+    end;
+  with Not_found -> pp_print_string ppf " (unknown arguments)"
   end;
-  printf "@.";
-;;
+  fprintf ppf "@?";
+  let line = Buffer.contents buf in
+  if !print_description_flag then begin
+    let llen = String.length line in
+    let tab_col = 45 in
+    let pad_len = max 0 (tab_col - llen) in
+    let padding = String.make pad_len ' ' in
+    printf "%s %s ;%s@." line padding !descr
+  end else
+    printf "%s@." line
+  
 
 (* Disassemble a block of code *)
 
@@ -845,6 +864,7 @@ type compilation_unit =
      compilation unit descriptor *)
 
 let print_cmo_infos ic cu =
+  Load_path.init !extra_path;
   printf "Unit name: %s@." cu.cu_name;
   if !print_imports_flag then begin
     printf "Interfaces imported:@.";
@@ -880,6 +900,7 @@ let print_cmo_infos ic cu =
     let evl = (input_value ic : Instruct.debug_event list) in
     record_events 0 evl;
     let (dirs : string list) = input_value ic in
+    List.iter Load_path.add_dir dirs;
     if !print_dirs_flag then begin
       printf "#dirs = %d@." (List.length dirs);
       printf "@[<v 2>dirs=";
@@ -1062,6 +1083,7 @@ let read_primitive_table ic len =
   String.split_on_char '\000' p |> List.filter ((<>) "") |> Array.of_list
 
 let dump_byte ic =
+  Load_path.init !extra_path;
   objfile := false;
   Bytesections.read_toc ic;
   let toc = Bytesections.toc () in
@@ -1125,7 +1147,7 @@ let dump_byte ic =
     printf "Globals table:@.";
     for i = 0 to Array.length init_data - 1 do
       printf "global[%d] = " i;
-      print_global !globals.(i);
+      print_global std_formatter !globals.(i);
       printf "@."
     done;
   end;
@@ -1142,6 +1164,7 @@ let dump_byte ic =
       let evl = (input_value ic : Instruct.debug_event list) in
       record_events orig evl;
       let (dirs : string list) = input_value ic in
+      List.iter Load_path.add_dir dirs;
       if !print_dirs_flag then begin
         printf "@[<v 2>Debug directories=@,";
         List.iter (fun dir -> printf "%s@ " dir) dirs;
@@ -1238,6 +1261,7 @@ let dump_obj_by_kind filename ic obj_kind =
 
 let dump_obj filename =
   the_filename := filename;
+  
   let open Magic_number in
   let dump_standard ic =
     match read_current_info ~expected_kind:None ic with
@@ -1326,6 +1350,10 @@ let print_none () =
   print_reloc_info_flag := false;
   ()
 
+let add_path (adir: string) =
+  extra_path := (adir :: (!extra_path));
+  ()
+
 let arg_list = [
   "-approx", Arg.Set print_approx_flag,
     " Print module approximation information";
@@ -1341,6 +1369,10 @@ let arg_list = [
     " Print debug information";
   "-no-debug", Arg.Clear print_debug_flag,
     " Do not print debug information";
+  "-describe", Arg.Set print_description_flag,
+    " Print descriptions of opcode in opcode listing";
+  "-no-describe", Arg.Clear print_description_flag,
+    " Do not print descriptions of opcode in opcode listing";
   "-dirs", Arg.Set print_dirs_flag,
     " Print source directories from the debug information";
   "-no-dirs", Arg.Clear print_dirs_flag,
@@ -1361,6 +1393,8 @@ let arg_list = [
     " Print globals table";
   "-no-globals", Arg.Clear print_globals_flag,
     " Do not print globals table";
+  "-I", Arg.String add_path,
+    "'-I s' adds 's' to the path to search for sources";
   "-imports", Arg.Set print_imports_flag,
     " Print imports";
   "-no-imports", Arg.Clear print_imports_flag,
