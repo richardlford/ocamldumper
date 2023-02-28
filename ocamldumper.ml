@@ -65,8 +65,10 @@ open Opcodes
 open Opnames
 
 let check_file fname =
-  if not (String.equal !desired_source_filename  "") then begin
-    keep_file := (fname = !desired_source_filename)
+  if !desired_source_filename <> "" then begin
+    (* Only change for non-none filemames *)
+    if fname <>  "_none_" then
+      keep_file := (fname = !desired_source_filename)
   end
 
 let is_desired_loc (loc: Location.t) =
@@ -551,7 +553,6 @@ let myprint_loc (loc: Location.t)  =
     let ls = loc.loc_start in
     let filename = ls.pos_fname in
     if filename <> "_none_" then begin
-      printf ",@ ";
       Location.print_loc std_formatter loc;
     end
   end
@@ -641,7 +642,7 @@ let print_ident_tbl  (title: string) (tbl: int Ident.tbl) =
   if tbl = Ident.empty then begin
     printf "%s = empty@ " title
   end else begin
-    printf "@[<hv 2>%s {@ " title;
+    printf "@[<2>%s {@ " title;
     Ident.iter (fun id idval -> 
       printf "%s=%d@ " (Ident.name id) idval
       ) tbl;
@@ -664,7 +665,7 @@ let print_comp_env (ce : Instruct.compilation_env) =
      recs = Ident.empty 
   then () 
   else begin 
-    printf "@[<hv 2>ev_compenv{@;";
+    printf "@[<2>ev_compenv{@ ";
     print_ident_tbl "ce_stack" stack;
     print_ident_tbl "ce_heap" heap;
     print_ident_tbl "ce_rec" recs;
