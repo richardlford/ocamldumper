@@ -985,63 +985,66 @@ type compilation_unit =
      compilation unit descriptor *)
 
 let print_cmo_infos ic cu =
-  Load_path.init !extra_path;
-  printf "Unit name: %s@." cu.cu_name;
-  if !print_imports_flag then begin
-    printf "Interfaces imported:@.";
-    List.iter print_name_crc cu.cu_imports;
-  end;
-  if !print_globals_flag then begin
-    printf "Required globals:@.";
-    List.iter print_required_global cu.cu_required_globals;
-  end;
-  printf "Uses unsafe features: ";
-  (match cu.cu_primitives with
-    | [] -> printf "no@."
-    | l  ->
-        printf "YES@.";
-        printf "Primitives declared in this module:@.";
-        List.iter print_line l);
-  printf "Force link: %s@." (if cu.cu_force_link then "YES" else "no");
-  reloc := cu.cu_reloc;
-  if !print_reloc_info_flag then begin
-    printf "Relocation information@.";
-    List.iter print_reloc cu.cu_reloc;
-  end;
-  let debug_size = cu.cu_debugsize in
-  if !print_debug_flag then
-    (printf "debug_size=%u@." debug_size);
-  if debug_size > 0 then begin
-    seek_in ic cu.cu_debug;
-    let evl = (input_value ic : Instruct.debug_event list) in
-    record_events 0 evl;
-    let (dirs : string list) = input_value ic in
-    List.iter add_expanded_dir dirs;
-    let ok_to_print = ref true in
-    let evl_len = List.length evl in
-    if evl_len > 0  then begin
-      ok_to_print := is_matching_module (List.hd evl).ev_module
+  if not (is_matching_module cu.cu_name) then ()
+  else begin
+    Load_path.init !extra_path;
+    printf "Unit name: %s@." cu.cu_name;
+    if !print_imports_flag then begin
+      printf "Interfaces imported:@.";
+      List.iter print_name_crc cu.cu_imports;
     end;
-    if !ok_to_print then begin
-      if !print_debug_flag then begin
-        printf "cu_debug=%u@." cu.cu_debug;
-        let in_pos = pos_in ic in
-        printf "in_pos=%u@." in_pos;
+    if !print_globals_flag then begin
+      printf "Required globals:@.";
+      List.iter print_required_global cu.cu_required_globals;
+    end;
+    printf "Uses unsafe features: ";
+    (match cu.cu_primitives with
+      | [] -> printf "no@."
+      | l  ->
+          printf "YES@.";
+          printf "Primitives declared in this module:@.";
+          List.iter print_line l);
+    printf "Force link: %s@." (if cu.cu_force_link then "YES" else "no");
+    reloc := cu.cu_reloc;
+    if !print_reloc_info_flag then begin
+      printf "Relocation information@.";
+      List.iter print_reloc cu.cu_reloc;
+    end;
+    let debug_size = cu.cu_debugsize in
+    if !print_debug_flag then
+      (printf "debug_size=%u@." debug_size);
+    if debug_size > 0 then begin
+      seek_in ic cu.cu_debug;
+      let evl = (input_value ic : Instruct.debug_event list) in
+      record_events 0 evl;
+      let (dirs : string list) = input_value ic in
+      List.iter add_expanded_dir dirs;
+      let ok_to_print = ref true in
+      let evl_len = List.length evl in
+      if evl_len > 0  then begin
+        ok_to_print := is_matching_module (List.hd evl).ev_module
       end;
-      if !print_dirs_flag then begin
-        printf "#dirs = %d@." (List.length dirs);
-        printf "@[<v 2>dirs=";
-        List.iter (fun dir -> printf "%s@ " dir) dirs;
-        printf "@]";
-      end;
-      if !print_code_flag then begin
-        (* Events will be dumped as part of the code.*)
-        seek_in ic cu.cu_pos;
-        print_code ic cu.cu_codesize
-      end else if !print_debug_flag then begin
-        let evl_len = List.length evl in
-        if evl_len > 0 && is_matching_module (List.hd evl).ev_module then begin
-          dump_eventlist evl
+      if !ok_to_print then begin
+        if !print_debug_flag then begin
+          printf "cu_debug=%u@." cu.cu_debug;
+          let in_pos = pos_in ic in
+          printf "in_pos=%u@." in_pos;
+        end;
+        if !print_dirs_flag then begin
+          printf "#dirs = %d@." (List.length dirs);
+          printf "@[<v 2>dirs=";
+          List.iter (fun dir -> printf "%s@ " dir) dirs;
+          printf "@]";
+        end;
+        if !print_code_flag then begin
+          (* Events will be dumped as part of the code.*)
+          seek_in ic cu.cu_pos;
+          print_code ic cu.cu_codesize
+        end else if !print_debug_flag then begin
+          let evl_len = List.length evl in
+          if evl_len > 0 && is_matching_module (List.hd evl).ev_module then begin
+            dump_eventlist evl
+          end
         end
       end
     end
