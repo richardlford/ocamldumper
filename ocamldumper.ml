@@ -26,10 +26,16 @@
 open Printf
 open Misc
 open Cmo_format
+open Lambda
+open Format
+open Opcodes
+open Opnames
+
 
 
 (* Command line options *)
 let the_filename = ref ""
+let the_realfile = ref ""
 let print_approx_flag = ref true
 let print_code_flag = ref true
 let print_crc_flag = ref true
@@ -48,21 +54,68 @@ let print_source_flag = ref true
 
 (* If true, only show identifiers in the computational environment *)
 let comp_env_filter_flag = ref true
+
+(* String from which a regular expression is formed to filter
+   output to the given module. *)
+let module_filter_string = ref ""
+let module_filter_re: Str.regexp option ref = ref None 
+
+let is_matching_module mdle =
+  match !module_filter_re with
+  | None -> true
+  | Some re -> Str.string_match re mdle 0
+
 (* Extra path to search for source files. *)
 let extra_path = ref ([] : string list)
 
 (* Source file we want to examine *)
 let desired_source_filename = ref ""
 
+(* List of directories to act as workspace roots. *)
+let workspace_roots: string list ref = ref []
+
 (* Tell if included in file filter *)
-let keep_file = ref true;
+let keep_file = ref true
+
+let workspace_marker = "/workspace_root"
+let workspace_marker_slash = "/workspace_root/"
+
+let workspace_marker_len = String.length workspace_marker
+let build_re = Str.regexp {|\(.*\)/_build/.*|}
 
 module Magic_number = Misc.Magic_number
 
-open Lambda
-open Format
-open Opcodes
-open Opnames
+let find_workspace_roots () =
+  printf "find_workspace_roots: entered.@.";
+  if Str.string_match build_re !the_realfile 0 then begin
+    printf "Got match.@.";
+    let root = Str.matched_group 1 !the_realfile in
+    printf "root=%s@." root;
+    workspace_roots := root :: !workspace_roots
+  end else begin
+    printf "Workspace root not found";
+    workspace_roots := ["/workspace_root"]
+  end
+    
+let has_workspace_marker dir_name =
+  (dir_name = workspace_marker) ||
+   String.starts_with ~prefix: workspace_marker_slash dir_name
+
+(* Because we might have multiple workspace roots, a single
+   filename might expand into multiple filenames. *)
+let expand_workspace_root dir_name =
+  if not (has_workspace_marker dir_name) then [dir_name]
+  else begin
+    if List.length !workspace_roots = 0 then
+      find_workspace_roots ();
+    let stem = String.sub dir_name workspace_marker_len 
+              (String.length dir_name - workspace_marker_len) in
+    List.map (fun root -> root ^ stem) !workspace_roots
+  end
+
+let add_expanded_dir dir_name =
+  let expanded = expand_workspace_root dir_name in
+  List.iter Load_path.add_dir expanded
 
 let check_file fname =
   if !desired_source_filename <> "" then begin
@@ -81,7 +134,8 @@ let is_desired_loc (loc: Location.t) =
   end
 
 let () =
-  Load_path.init []
+  Load_path.reset ()
+
 
 (* Read signed and unsigned integers *)
 
@@ -748,7 +802,7 @@ let print_event (ev: Instruct.debug_event) =
   let ls = ev.ev_loc.loc_start in
   let fname = ls.Lexing.pos_fname in
   check_file fname;
-  if !keep_file then begin
+  if !keep_file && is_matching_module ev.ev_module then begin
     if !print_full_events_flag then
       print_ev ev
     else if !print_locations_flag then
@@ -764,19 +818,22 @@ let print_event (ev: Instruct.debug_event) =
 
 
 let print_ev_indexed (ev: Instruct.debug_event)  j =
-  printf "@[<2>ev[%d]:{@ " j;
-  print_event ev;
-  printf "}@]@.";
-  ()
+  if is_matching_module ev.ev_module then begin
+    printf "@[<2>ev[%d]:{@ " j;
+    print_event ev;
+    printf "}@]@.";
+    ()
+  end
 
 let dump_eventlist evl =
   if !print_debug_flag then begin
-    printf "length evl=%d@." (List.length evl);
+    printf "{length evl=%d@." (List.length evl);
     let j = ref 0 in
     List.iter (fun ev ->
       print_ev_indexed  ev !j;
       j := !j + 1;
       ) evl;
+    printf "}@.";
   end
 
 let print_instr ic =
@@ -955,31 +1012,41 @@ let print_cmo_infos ic cu =
   if !print_debug_flag then
     (printf "debug_size=%u@." debug_size);
   if debug_size > 0 then begin
-    if !print_debug_flag then begin
-      printf "cu_debug=%u@." cu.cu_debug;
-      let in_pos = pos_in ic in
-      printf "in_pos=%u@." in_pos;
-    end;
     seek_in ic cu.cu_debug;
     let evl = (input_value ic : Instruct.debug_event list) in
     record_events 0 evl;
     let (dirs : string list) = input_value ic in
-    List.iter Load_path.add_dir dirs;
-    if !print_dirs_flag then begin
-      printf "#dirs = %d@." (List.length dirs);
-      printf "@[<v 2>dirs=";
-      List.iter (fun dir -> printf "%s@ " dir) dirs;
-      printf "@]";
+    List.iter add_expanded_dir dirs;
+    let ok_to_print = ref true in
+    let evl_len = List.length evl in
+    if evl_len > 0  then begin
+      ok_to_print := is_matching_module (List.hd evl).ev_module
     end;
-    if !print_code_flag then begin
-      (* Events will be dumped as part of the code.*)
-      seek_in ic cu.cu_pos;
-      print_code ic cu.cu_codesize
-    end else if !print_debug_flag then begin
-      printf "#evl = %d@." (List.length evl);
-      dump_eventlist evl
+    if !ok_to_print then begin
+      if !print_debug_flag then begin
+        printf "cu_debug=%u@." cu.cu_debug;
+        let in_pos = pos_in ic in
+        printf "in_pos=%u@." in_pos;
+      end;
+      if !print_dirs_flag then begin
+        printf "#dirs = %d@." (List.length dirs);
+        printf "@[<v 2>dirs=";
+        List.iter (fun dir -> printf "%s@ " dir) dirs;
+        printf "@]";
+      end;
+      if !print_code_flag then begin
+        (* Events will be dumped as part of the code.*)
+        seek_in ic cu.cu_pos;
+        print_code ic cu.cu_codesize
+      end else if !print_debug_flag then begin
+        let evl_len = List.length evl in
+        if evl_len > 0 && is_matching_module (List.hd evl).ev_module then begin
+          dump_eventlist evl
+        end
+      end
     end
   end
+
 
 let print_spaced_string s =
   printf " %s" s
@@ -1223,17 +1290,29 @@ let dump_byte ic =
       (printf "num_eventlists=%d@." num_eventlists);
     for _i = 1 to num_eventlists do
       let orig = input_binary_int ic in
-      if !print_debug_flag then
-        (printf "orig=%d@." orig);
       let evl = (input_value ic : Instruct.debug_event list) in
       record_events orig evl;
       let (dirs : string list) = input_value ic in
-      List.iter Load_path.add_dir dirs;
-      if !print_dirs_flag then begin
-        printf "@[<v 2>Debug directories=@,";
-        List.iter (fun dir -> printf "%s@ " dir) dirs;
-        printf "@]@.";
+      List.iter add_expanded_dir dirs;
+      let ok_to_print = ref true in
+      let evl_len = List.length evl in
+      if evl_len > 0  then begin
+        ok_to_print := is_matching_module (List.hd evl).ev_module
       end;
+      if !ok_to_print then begin
+        if !print_debug_flag then
+          (printf "{orig=%d@." orig);
+        if !print_dirs_flag then begin
+          printf "@[<v 2>Debug directories=@,";
+          List.iter (fun dir -> printf "%s@ " dir) dirs;
+          printf "@]@.";
+        end;
+        if not !print_code_flag then begin
+            dump_eventlist evl
+        end;
+        if !print_debug_flag then
+          printf "}@."
+      end
     done
   with Not_found -> printf "No debug information";
   end;
@@ -1324,8 +1403,13 @@ let dump_obj_by_kind filename ic obj_kind =
          (human_name_of_kind obj_kind)
 
 let dump_obj filename =
+  let ocamlpath = Config.standard_library in
+  printf "Ocaml lib=%s@." ocamlpath;
   the_filename := filename;
-  
+  the_realfile := Unix.realpath !the_filename;
+  printf "the realfile = %s@." !the_realfile;
+  find_workspace_roots ();
+
   let open Magic_number in
   let dump_standard ic =
     match read_current_info ~expected_kind:None ic with
@@ -1418,6 +1502,10 @@ let add_path (adir: string) =
   extra_path := (adir :: (!extra_path));
   ()
 
+let set_module_filter re_string =
+  module_filter_string := re_string;
+  module_filter_re := Some (Str.regexp re_string)
+
 let arg_list = [
   "-approx", Arg.Set print_approx_flag,
     " Print module approximation information";
@@ -1472,6 +1560,8 @@ let arg_list = [
     " Print locations of debug events";
   "-no-locations", Arg.Clear print_locations_flag,
     " Do not print locations of debug events";
+  "-mod-filter", Arg.String set_module_filter,
+    "'-mod-filter re' will filter output to only output for modules matching re";
   "-primitives", Arg.Set print_primitives_flag,
     " Print primitives used table";
   "-no-primitives", Arg.Clear print_primitives_flag,

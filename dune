@@ -26,6 +26,7 @@ let () = Jbuild_plugin.V1.send @@ {|
    compiler-libs.common
    compiler-libs.optcomp
    compiler-libs.toplevel
+   str
    opnames
    show_source
 |} ^ String.concat "\n" impl_libs ^ {|))

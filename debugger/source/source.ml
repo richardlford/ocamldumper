@@ -17,6 +17,7 @@
 (************************ Source management ****************************)
 open Misc
 open Primitives
+open Format
 
 let source_extensions = [".ml"]
 
@@ -24,7 +25,9 @@ let source_extensions = [".ml"]
 
 let source_of_module pos mdle =
   let pos_fname = pos.Lexing.pos_fname in
-  if Sys.file_exists pos_fname then pos_fname else
+  if Sys.file_exists pos_fname then begin
+    pos_fname 
+  end else
   let is_submodule m m' =
     let len' = String.length m' in
     try
