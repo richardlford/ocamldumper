@@ -86,11 +86,8 @@ let build_re = Str.regexp {|\(.*\)/_build/.*|}
 module Magic_number = Misc.Magic_number
 
 let find_workspace_roots () =
-  printf "find_workspace_roots: entered.@.";
   if Str.string_match build_re !the_realfile 0 then begin
-    printf "Got match.@.";
     let root = Str.matched_group 1 !the_realfile in
-    printf "root=%s@." root;
     workspace_roots := root :: !workspace_roots
   end else begin
     printf "Workspace root not found";
@@ -784,7 +781,7 @@ let print_ev (ev: Instruct.debug_event) =
   if !print_source_flag then
     Show_source.show_point ev true;
   printf "pc=%d(=4*%d),@ " ev.Instruct.ev_pos (ev.Instruct.ev_pos/4 );
-  printf "ev_module=%s" ev.Instruct.ev_module;
+  printf "ev_module=%s@ " ev.Instruct.ev_module;
   myprint_loc ev.ev_loc;
   printf ",@ ev_kind=%s,@ " (kind_string ev);
   printf "ev_defname=%s,@ " ev.ev_defname;
