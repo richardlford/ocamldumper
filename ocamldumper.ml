@@ -51,6 +51,7 @@ let print_locations_flag = ref true
 let print_primitives_flag = ref true
 let print_reloc_info_flag = ref true
 let print_source_flag = ref true
+let print_stack_flag = ref true
 
 (* If true, only show identifiers in the computational environment *)
 let comp_env_filter_flag = ref true
@@ -96,7 +97,7 @@ let find_workspace_roots () =
     
 let has_workspace_marker dir_name =
   (dir_name = workspace_marker) ||
-   String.starts_with ~prefix: workspace_marker_slash dir_name
+   Compat.starts_with ~prefix: workspace_marker_slash dir_name
 
 (* Because we might have multiple workspace roots, a single
    filename might expand into multiple filenames. *)
@@ -777,9 +778,50 @@ type debug_event =
 
 *)
 
+let print_stack_and_env (ev: Instruct.debug_event) =
+  let ce = ev.ev_compenv in
+  let heap : int Ident.tbl = ce.ce_heap in
+  (* Find number of heap elements. They start a 2 since slot 0
+     has the starting pc and slot 1 has the arity and env start. *)
+  let hmax = ref 0 in
+  Ident.iter (fun id idval -> 
+      if idval > !hmax then
+        hmax := idval;
+      ) heap;
+  let sz = ev.ev_stacksize in
+  if sz = 0 && !hmax = 0 then () else begin
+    if sz > 0 then begin
+      let ray = Array.make sz "" in
+      let stack : int Ident.tbl = ce.ce_stack in
+      Ident.iter (fun id idval -> 
+        ray.(sz - idval) <- Ident.name id;
+        ) stack;
+      printf "@[<2>{Stack:";
+      for i = 0 to sz - 1 do
+        printf "@ %d:%s" i ray.(i)
+      done;
+      printf "@]}@ ";
+    end;
+    if !hmax > 0 then begin
+      let ray = Array.make (!hmax+1) "" in
+      Ident.iter (fun id idval -> 
+        ray.(idval) <- Ident.name id;
+        ) heap;
+      printf "@[<2>{Heap:";
+      for i = 2 to !hmax do
+        printf "@ %d:%s" i ray.(i)
+      done;
+      printf "@]}@ ";
+    end;
+    printf "@.";
+  end
+
+
 let print_ev (ev: Instruct.debug_event) =
   if !print_source_flag then
     Show_source.show_point ev true;
+  if !print_stack_flag then
+    print_stack_and_env ev;
   printf "pc=%d(=4*%d),@ " ev.Instruct.ev_pos (ev.Instruct.ev_pos/4 );
   printf "ev_module=%s@ " ev.Instruct.ev_module;
   myprint_loc ev.ev_loc;
@@ -804,13 +846,15 @@ let print_event (ev: Instruct.debug_event) =
       print_ev ev
     else if !print_locations_flag then
       let le = ev.ev_loc.loc_end in
-      printf "Def %s, File \"%s\", line %d, characters %d-%d:@." 
-      ev.ev_defname
+      printf "Def %s, Mod %s, File \"%s\", line %d, characters %d-%d:@." 
+      ev.ev_defname ev.ev_module
       fname
         ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
         (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
       if !print_source_flag then
-        Show_source.show_point ev true
+        Show_source.show_point ev true;
+      if !print_stack_flag then
+        print_stack_and_env ev
   end
 
 
@@ -984,7 +1028,7 @@ type compilation_unit =
 let print_cmo_infos ic cu =
   if not (is_matching_module cu.cu_name) then ()
   else begin
-    Load_path.init !extra_path;
+    Compat.load_path_init !extra_path;
     printf "Unit name: %s@." cu.cu_name;
     if !print_imports_flag then begin
       printf "Interfaces imported:@.";
@@ -1088,7 +1132,7 @@ let string_of_pers_flags fl =
     Cmi_format.Rectypes -> "Rectypes"
   | Alerts al -> "Alerts"
   | Cmi_format.Opaque -> "Opaque"
-  | Unsafe_string -> "Unsafe_string"
+  | _ -> "Unsafe_string"
 
 let print_cmi_infos cmi =
   printf "Unit name: %s@." cmi.Cmi_format.cmi_name;
@@ -1214,7 +1258,7 @@ let read_primitive_table ic len =
   String.split_on_char '\000' p |> List.filter ((<>) "") |> Array.of_list
 
 let dump_byte ic =
-  Load_path.init !extra_path;
+  Compat.load_path_init !extra_path;
   objfile := false;
   Bytesections.read_toc ic;
   let toc = Bytesections.toc () in
@@ -1406,7 +1450,7 @@ let dump_obj filename =
   let ocamlpath = Config.standard_library in
   printf "Ocaml lib=%s@." ocamlpath;
   the_filename := filename;
-  the_realfile := Unix.realpath !the_filename;
+  the_realfile := Compat.realpath !the_filename;
   printf "the realfile = %s@." !the_realfile;
   find_workspace_roots ();
 
@@ -1572,6 +1616,8 @@ let arg_list = [
   "-no-source", Arg.Clear print_source_flag, " Do not print source with code";
   "-src-filter", Arg.Set_string desired_source_filename, 
     "'-src_filter src' only shows instructions for events related to src";
+  "-stack", Arg.Set print_stack_flag, " Print stack contents at events";
+  "-no-stack", Arg.Clear print_stack_flag, " Do not print stack contents at events";
   "-all", Arg.Unit print_all,
     "Enable all print options";
   "-none", Arg.Unit print_none,

@@ -20,7 +20,7 @@ let () = Jbuild_plugin.V1.send @@ {|
  (modes byte)
  (modules ocamldumper)
  (preprocess
-  (pps lwt_ppx))
+  (pps lwt_ppx ppx_optcomp))
  (libraries 
    compiler-libs.bytecomp
    compiler-libs.common
@@ -29,5 +29,6 @@ let () = Jbuild_plugin.V1.send @@ {|
    str
    opnames
    show_source
+   compat
 |} ^ String.concat "\n" impl_libs ^ {|))
 |}

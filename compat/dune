@@ -1,0 +1,10 @@
+(library
+ (name compat)
+ (preprocess (pps ppx_optcomp))
+ (libraries 
+   compiler-libs.common
+   str
+   unix
+   )
+ (flags (:standard -w "-9"))
+ )
