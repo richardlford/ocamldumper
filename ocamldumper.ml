@@ -845,12 +845,11 @@ let print_event (ev: Instruct.debug_event) =
     if !print_full_events_flag then
       print_ev ev
     else if !print_locations_flag then
-      let le = ev.ev_loc.loc_end in
-      printf "Def %s, Mod %s, File \"%s\", line %d, characters %d-%d:@." 
+      printf "Def %s, Mod %s, %s%s " 
       ev.ev_defname ev.ev_module
-      fname
-        ls.Lexing.pos_lnum (ls.Lexing.pos_cnum - ls.Lexing.pos_bol)
-        (le.Lexing.pos_cnum - ls.Lexing.pos_bol);
+      (kind_string ev) (info_string ev);
+      Location.print_loc std_formatter ev.ev_loc;
+      printf "@.";
       if !print_source_flag then
         Show_source.show_point ev true;
       if !print_stack_flag then
